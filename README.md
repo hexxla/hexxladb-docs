@@ -1,16 +1,14 @@
-# Mintlify Starter Kit
+# HexxlaDB Documentation
 
-Use the starter kit to get your docs deployed and ready to customize.
+This repository contains the documentation for [HexxlaDB](https://github.com/hexxla/hexxladb) — an embedded Go database for persistent, structured, contradiction-aware storage with spatial indexing.
 
-Click the green **Use this template** button at the top of this repo to copy the Mintlify starter kit. The starter kit contains examples with
+The documentation covers:
 
-- Guide pages
-- Navigation
-- Customizations
-- API reference pages
-- Use of popular components
-
-**[Follow the full quickstart guide](https://starter.mintlify.com/quickstart)**
+- Core concepts (cells, seams, edges, facets, coordinates)
+- API reference for all exported symbols
+- Storage layout and internals
+- Production operations (backups, encryption, changefeed, retention)
+- Quickstart guide and examples
 
 ## AI-assisted writing
 
@@ -28,13 +26,13 @@ See the [AI tools guides](/ai-tools) for tool-specific setup.
 
 Install the [Mintlify CLI](https://www.npmjs.com/package/mint) to preview your documentation changes locally. To install, use the following command:
 
-```
+```bash
 npm i -g mint
 ```
 
 Run the following command at the root of your documentation, where your `docs.json` is located:
 
-```
+```bash
 mint dev
 ```
 
@@ -52,4 +50,6 @@ Install our GitHub app from your [dashboard](https://dashboard.mintlify.com/sett
 - If a page loads as a 404: Make sure you are running in a folder with a valid `docs.json`.
 
 ### Resources
+
+- [HexxlaDB repository](https://github.com/hexxla/hexxladb)
 - [Mintlify documentation](https://mintlify.com/docs)
