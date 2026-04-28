@@ -83,6 +83,10 @@
     "light": "/logo/light.svg",
     "dark": "/logo/dark.svg"
   },
+  "hero": {
+    "light": "/images/hexxla-hero-light.svg",
+    "dark": "/images/hexxla-hero-dark.svg"
+  },
   "navbar": {
     "links": [
       {

@@ -3,6 +3,29 @@ title: "HexxlaDB"
 description: "Persistent, structured, contradiction-aware storage with spatial indexing"
 ---
 
+<img
+  src="/images/hexxla-hero-light.svg"
+  alt="HexxlaDB hero"
+  style={{
+    width: "100%",
+    maxWidth: "800px",
+    margin: "0 auto 2rem auto",
+    display: "block",
+  }}
+  className="dark:hidden"
+/>
+<img
+  src="/images/hexxla-hero-dark.svg"
+  alt="HexxlaDB hero"
+  style={{
+    width: "100%",
+    maxWidth: "800px",
+    margin: "0 auto 2rem auto",
+    display: "block",
+  }}
+  className="hidden dark:block"
+/>
+
 The spatial locality model is inspired by associative human memory — related data is placed nearby for efficient neighborhood retrieval, mirroring how associative recall works in the brain.
 
 HexxlaDB is an embedded database built from scratch for applications that need persistent, structured storage with spatial locality, contradiction tracking, and time-travel capabilities. It stores data on a hexagonal coordinate grid where **spatial locality is a first-class physical property of the on-disk format**. This is massive for any system that wants to do repeated bounded-radius traversals without paying random I/O tax.
