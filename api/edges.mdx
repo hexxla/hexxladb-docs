@@ -1,0 +1,80 @@
+---
+title: "Edges"
+description: "Edge operations: PutEdge, GetEdge, LinkCells"
+---
+
+## PutEdge
+
+Store a directed edge primary.
+
+```go
+fromPk, _ := lattice.Pack(hexxladb.Coord{Q: 3, R: 1})
+toPk, _ := lattice.Pack(hexxladb.Coord{Q: 4, R: 2})
+
+err := tx.PutEdge(ctx, record.EdgeRecord{
+    From:         fromPk,
+    To:           toPk,
+    RelationType: "see-also",
+    Weight:       1.0,
+    Provenance: record.ProvenanceWire{
+        SourceID:   "session-2",
+        Confidence: 0.9,
+    },
+})
+```
+
+## GetEdge
+
+Edge lookup by endpoints and relation type.
+
+```go
+edge, ok, err := tx.GetEdge(ctx, fromPk, toPk, "see-also")
+if err != nil {
+    return err
+}
+if !ok {
+    return errors.New("edge not found")
+}
+fmt.Printf("Weight: %f\n", edge.Weight)
+```
+
+## AscendEdgesFrom
+
+Iterate all out-edges from a packed coordinate.
+
+```go
+err := tx.AscendEdgesFrom(ctx, fromPk, func(edge record.EdgeRecord) bool {
+    fmt.Printf("Relation: %s, Weight: %f\n", edge.RelationType, edge.Weight)
+    return true // continue iteration
+})
+```
+
+## LinkCells
+
+Sugar: pack coords and put edge.
+
+```go
+from := hexxladb.Coord{Q: 3, R: 1}
+to := hexxladb.Coord{Q: 4, R: 2}
+
+err := tx.LinkCells(ctx, from, to, "see-also", 1.0, record.ProvenanceWire{
+    SourceID:   "session-2",
+    Confidence: 0.9,
+})
+```
+
+## Common relation types
+
+While you can define any relation type string, common patterns include:
+
+| Relation type | Use case |
+| ------------- | -------- |
+| `see-also` | Related content worth exploring |
+| `follow-up` | Next item in a sequence or conversation |
+| `derived-from` | Source material or parent document |
+| `depends-on` | Prerequisite relationship |
+| `related-to` | General association |
+
+## See also
+
+- [Edges](/concepts/edges) — Edge concepts and use cases

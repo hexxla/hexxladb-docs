@@ -1,0 +1,127 @@
+---
+title: "Embeddings"
+description: "Vector storage and HNSW approximate nearest-neighbor search"
+---
+
+## Configuration
+
+Embeddings are configured via options when opening the database:
+
+```go
+db, err := hexxladb.Open("memory.db", &hexxladb.Options{
+    EmbeddingDimension: 384,  // e.g., all-MiniLM-L6-v2
+    DistanceMetric:     hexxladb.DistanceCosine,
+})
+```
+
+Dimension and distance metric are immutable after creation.
+
+## Distance metrics
+
+| Metric | Description | Range |
+| ------ | ----------- | ----- |
+| `DistanceCosine` | Cosine similarity (default) | [-1, 1] |
+| `DistanceDotProduct` | Raw dot product (assumes normalized vectors) | - |
+| `DistanceL2` | Euclidean distance (inverted for ranking) | - |
+
+## PutEmbedding
+
+Store a vector embedding for a cell coordinate.
+
+```go
+coord := hexxladb.Coord{Q: 3, R: 1}
+pk, _ := lattice.Pack(coord)
+vector := []float32{0.1, 0.2, 0.3, ...} // 384 dimensions
+
+err := tx.PutEmbedding(pk, vector)
+```
+
+Dimension must match `EmbeddingDimension`. HNSW graph is maintained automatically.
+
+## GetEmbedding
+
+Retrieve the vector embedding for a cell coordinate.
+
+```go
+vector, ok, err := tx.GetEmbedding(ctx, pk)
+if err != nil {
+    return err
+}
+if !ok {
+    return errors.New("embedding not found")
+}
+```
+
+## DeleteEmbedding
+
+Remove an embedding. Idempotent.
+
+```go
+err := tx.DeleteEmbedding(ctx, pk)
+```
+
+## SearchByEmbedding
+
+HNSW-accelerated nearest-neighbor search with flat-scan fallback. Returns top-K results sorted by score.
+
+```go
+queryVector := []float32{0.1, 0.2, 0.3, ...}
+
+results, err := tx.SearchByEmbedding(ctx, queryVector, hexxladb.EmbeddingSearchConfig{
+    MaxResults: 10,
+    MinScore:   0.5,
+})
+
+for _, result := range results {
+    fmt.Printf("Coord: %v, Score: %f\n", result.Coord, result.Score)
+}
+```
+
+**Search config:**
+- `MaxResults` — Maximum results to return (default 10)
+- `MinScore` — Minimum similarity threshold
+
+**Result:**
+- `Coord` — Packed coordinate of the matching cell
+- `Score` — Similarity score
+
+## ReindexEmbeddings
+
+Bulk recompute all embeddings via a user-supplied function. Intended for model changes.
+
+```go
+err := tx.ReindexEmbeddings(ctx, func(ctx context.Context, rec record.CellRecord) ([]float32, error) {
+    // Compute embedding from cell content
+    return yourEmbeddingModel.Embed(rec.RawContent), nil
+})
+```
+
+## Integration with query engine
+
+`CellQuery.Embedding` and `CellSearchConfig.Embedding` trigger ANN-accelerated seed selection in `QueryCells` / `SearchCells`. Embedding similarity is added to the composite relevance score; all other predicates (tags, temporal, spatial) apply as post-filters.
+
+```go
+results, err := tx.QueryCells(ctx, hexxladb.CellQuery{
+    Embedding:     queryVector,
+    RequireTags:   []string{"fact"},
+    MinConfidence: 0.5,
+    MaxResults:    8,
+    SortBy:        hexxladb.SortByScore,
+})
+```
+
+## Errors
+
+| Error | Description |
+| ----- | ----------- |
+| `ErrEmbeddingsDisabled` | Embedding operation on a database with dimension 0 |
+| `ErrEmbeddingDimension` | Vector length does not match `EmbeddingDimension` |
+
+## Cascade behavior
+
+`DeleteCell` cascades to remove the cell's embedding and HNSW node automatically.
+
+## See also
+
+- [Query](/api/query) — Query engine with embedding integration
+- [Search](/api/search) — Content search with embeddings

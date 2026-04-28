@@ -1,0 +1,171 @@
+---
+title: "Seams"
+description: "Contradiction and supersession markers in HexxlaDB"
+---
+
+A **Seam** is a visible marker linking two cells that contradict each other or represent a preference evolution. Seams surface conflicts so your application can reason about them instead of silently overwriting information.
+
+## Seam structure
+
+```go
+type Seam struct {
+    ID               string // ULID string when persisted
+    CellA            Coord
+    CellB            Coord
+    SeamType         string
+    Reason           string
+    ConfidenceDelta  float64
+    DetectedAt       time.Time
+    ResolutionStatus string
+    ResolutionNote   string
+}
+```
+
+**Key components:**
+
+- **ID** — ULID string for unique identification
+- **CellA / CellB** — Coordinates of the two related cells
+- **SeamType** — Type of relationship (e.g., "conflict", "supersedes")
+- **Reason** — Human-readable explanation of the relationship
+- **ConfidenceDelta** — Difference in confidence between the two cells
+- **DetectedAt** — When the seam was created
+- **ResolutionStatus** — Current state (e.g., "unresolved", "merged", "superseded")
+- **ResolutionNote** — Notes on how the conflict was resolved
+
+## Seam types
+
+### Conflict
+
+A **conflict** seam marks outright contradictions between two facts:
+
+```go
+db.Update(func(tx *hexxladb.Tx) error {
+    cellA := hexxladb.Coord{Q: 3, R: 1}
+    cellB := hexxladb.Coord{Q: 4, R: 2}
+    return tx.MarkConflict(cellA, cellB, "Conflicting architecture recommendations")
+})
+```
+
+Use conflicts when two records cannot both be true.
+
+### Supersession
+
+A **supersession** seam marks preference evolution — one cell replaces another:
+
+```go
+db.Update(func(tx *hexxladb.Tx) error {
+    newPref := hexxladb.Coord{Q: 5, R: 1}
+    oldPref := hexxladb.Coord{Q: 5, R: 0}
+    return tx.MarkSupersedes(newPref, oldPref, "User changed communication preference")
+})
+```
+
+Use supersession when a user changes their mind or preferences evolve over time.
+
+## Finding seams
+
+Query seams within a radius of a center coordinate:
+
+```go
+db.View(func(tx *hexxladb.Tx) error {
+    center := hexxladb.Coord{Q: 3, R: 1}
+    seams, err := tx.FindSeams(ctx, center, 3, true) // radius 3, unresolved only
+    if err != nil {
+        return err
+    }
+    // Process seams...
+})
+```
+
+For time-travel queries, use `FindSeamsAt`:
+
+```go
+asOf := time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
+seams, err := tx.FindSeamsAt(ctx, center, 3, true, asOf)
+```
+
+## Resolving seams
+
+Resolution is an explicit application-guided operation. Update the resolution status:
+
+```go
+db.Update(func(tx *hexxladb.Tx) error {
+    seamID := "01H...ULID"
+    return tx.ResolveSeam(ctx, seamID, "merged", "Reconciled by taking the more recent source")
+})
+```
+
+Resolution statuses:
+
+- **unresolved** — Default state, conflict still active
+- **merged** — Cells were combined into a new cell
+- **superseded** — One cell replaced the other
+- **archived** — Conflict deemed irrelevant or outdated
+
+## Seam visibility in context
+
+When assembling context with `LoadContextPack`, you can include seams and control supersession filtering:
+
+```go
+pack, err := tx.LoadContextPackFrom(ctx,
+    2,     // max ring radius
+    4096,  // token budget
+    hexxladb.ByteLenBudgeter{},
+    hexxladb.LoadContextBudgetConfig{
+        FilterSuperseded: true,  // automatically exclude superseded cells
+        IncludeSeams:     true,  // surface contradictions for the system
+    },
+    seeds...,
+)
+```
+
+**FilterSuperseded**: When enabled, the context assembler automatically excludes cells that have been superseded and substitutes their successors. This ensures context packs always reflect the current state of preferences and knowledge without manual filtering. The original cell remains in the database for historical queries (via MVCC), but is hidden from new context assembly.
+
+**IncludeSeams**: Injects relevant seams into the context pack so the system can see and reason about conflicts.
+
+## Seam storage
+
+Seams are stored as first-class entities with their own keyspace:
+
+- Primary key: `seam/<ulid>`
+- Secondary: `seam-by-cells/<packed_a>/<packed_b>/<ulid>`
+
+This ensures seams remain queryable even after cells are deleted or superseded. Seams are never collapsed into ordinary edges.
+
+## Secondary indexes
+
+Seams are indexed by source and time for efficient discovery:
+
+```go
+// Find all seams from a specific source
+tx.AscendSeamsBySource(ctx, "session-2", func(seam record.SeamRecord) bool {
+    // Process seam
+    return true // continue iteration
+})
+
+// Find seams in a time bucket
+tx.AscendSeamsInTimeBucket(ctx, bucket, func(seam record.SeamRecord) bool {
+    // Process seam
+    return true
+})
+```
+
+## Manual vs automatic seam creation
+
+**Manual:**
+
+- Explicit `MarkConflict` or `MarkSupersedes` calls
+- Full control over when seams are created
+- Recommended for production use
+
+**Automatic (future):**
+
+- Synchronous check during `PutCell` or `LinkCells`
+- Creates seam when embedding delta plus provenance mismatch exceeds threshold
+- Optional background scanning for heavy analysis
+
+## See also
+
+- [Cells](/concepts/cells) — Core data units
+- [Edges](/concepts/edges) — Directed relationships between cells
+- [Context assembly](/api/context) — Budgeted context with seam inclusion

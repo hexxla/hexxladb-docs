@@ -1,0 +1,117 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "HexxlaDB",
+  "colors": {
+    "primary": "#00ccff",
+    "light": "#aaeeff",
+    "dark": "#0099cc"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Getting started",
+            "pages": ["index", "quickstart"]
+          },
+          {
+            "group": "Core concepts",
+            "pages": [
+              "concepts/cells",
+              "concepts/seams",
+              "concepts/edges",
+              "concepts/facets",
+              "concepts/coordinates"
+            ]
+          },
+          {
+            "group": "Storage & internals",
+            "pages": ["storage/layout", "storage/keys", "storage/mvcc"]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "operations/backups",
+              "operations/encryption",
+              "operations/changefeed",
+              "operations/retention"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API reference",
+        "groups": [
+          {
+            "group": "Database lifecycle",
+            "pages": ["api/database", "api/transactions", "api/options"]
+          },
+          {
+            "group": "Cell operations",
+            "pages": ["api/cells", "api/embeddings", "api/facets", "api/edges"]
+          },
+          {
+            "group": "Query & search",
+            "pages": ["api/query", "api/search", "api/context"]
+          },
+          {
+            "group": "Advanced",
+            "pages": ["api/mvcc", "api/changelog", "api/health"]
+          }
+        ]
+      }
+    ],
+    "global": {
+      "anchors": [
+        {
+          "anchor": "GitHub",
+          "href": "https://github.com/hexxla/hexxladb",
+          "icon": "github"
+        },
+        {
+          "anchor": "Go Reference",
+          "href": "https://pkg.go.dev/github.com/hexxla/hexxladb",
+          "icon": "book-open-cover"
+        }
+      ]
+    }
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "hexxla/hexxladb",
+        "href": "https://github.com/hexxla/hexxladb",
+        "icon": "github"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Get Started",
+      "href": "/quickstart"
+    }
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "chatgpt",
+      "claude",
+      "perplexity",
+      "mcp",
+      "cursor",
+      "vscode"
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/hexxla/hexxladb"
+    }
+  }
+}

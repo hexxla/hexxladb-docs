@@ -1,0 +1,145 @@
+---
+title: "Transactions"
+description: "Read-only and read-write transactions with MVCC snapshots"
+---
+
+## Transaction types
+
+### View
+
+Read-only transaction. Pins MVCC `read_seq` at start when format v2 is enabled.
+
+```go
+err := db.View(func(tx *hexxladb.Tx) error {
+    // Read operations only
+    cell, ok, err := tx.GetCell(ctx, pk)
+    // ...
+})
+```
+
+### Update / Batch
+
+Exclusive write lock. Logical writes via `*Tx`.
+
+```go
+err := db.Update(func(tx *hexxladb.Tx) error {
+    // Read and write operations
+    return tx.PutCell(ctx, record.CellRecord{...})
+})
+```
+
+`Batch` is an alias for `Update` for naming parity.
+
+## MVCC snapshots
+
+### ViewAt
+
+Pin a specific `read_seq` snapshot. Returns `ErrReadSeqFuture` if the sequence is too new.
+
+```go
+err := db.ViewAt(readSeq, func(tx *hexxladb.Tx) error {
+    // Reads see the state as of readSeq
+    return nil
+})
+```
+
+### ViewAtTime
+
+Map wall-clock time to the latest commit ≤ `as_of`, then pin that snapshot.
+
+```go
+asOf := time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
+err := db.ViewAtTime(asOf, func(tx *hexxladb.Tx) error {
+    // Reads see the state as of the wall-clock time
+    return nil
+})
+```
+
+## Transaction properties
+
+### Writable
+
+Returns `true` inside `Update` / `Batch` transactions.
+
+```go
+if tx.Writable() {
+    // Safe to write
+}
+```
+
+## Raw B+ tree operations
+
+### Get
+
+Raw B+ tree get by byte key.
+
+```go
+value, ok, err := tx.Get(ctx, key)
+```
+
+### Put
+
+Raw B+ tree put (requires `Update`).
+
+```go
+err := tx.Put(ctx, key, value)
+```
+
+### AscendRange
+
+Ordered scan over byte keys `[from, to)`.
+
+```go
+err := tx.AscendRange(ctx, from, to, func(k, v []byte) bool {
+    // Process key-value pair
+    return true // continue iteration
+})
+```
+
+## Snapshot tags
+
+Human-friendly names for MVCC commit sequences.
+
+### TagSnapshot
+
+Pin the current head `CommitSeq` under a label. Overwrites existing tags with the same name.
+
+```go
+err := db.TagSnapshot(ctx, "release-v1.0.0")
+```
+
+Label must be non-empty and ≤ 200 bytes.
+
+### ViewAtTag
+
+Open a read-only snapshot pinned to a tag.
+
+```go
+err := db.ViewAtTag(ctx, "release-v1.0.0", func(tx *hexxladb.Tx) error {
+    // Reads see the state at the tagged snapshot
+    return nil
+})
+```
+
+Returns `ErrSnapshotTagNotFound` if the label does not exist.
+
+### ListSnapshotTags
+
+Return all tags sorted by label.
+
+```go
+tags, err := db.ListSnapshotTags(ctx)
+```
+
+### DeleteSnapshotTag
+
+Remove a tag entry. Does not affect underlying data.
+
+```go
+err := db.DeleteSnapshotTag(ctx, "release-v1.0.0")
+```
+
+## See also
+
+- [Database](/api/database) — Database lifecycle
+- [MVCC](/storage/mvcc) — Multi-version concurrency control

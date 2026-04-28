@@ -1,0 +1,193 @@
+---
+title: "Facets"
+description: "Derived views cryptographically bound to cells"
+---
+
+A **Facet** is a summary or annotation cryptographically bound to a cell. Facets enable multiple views of the same content without modifying the original `RawContent`.
+
+## Facet IDs
+
+Facet IDs are fixed in v1 (6 facet IDs: 0-5):
+
+| Facet ID | Purpose                                  | Lifecycle                             |
+| -------- | ---------------------------------------- | ------------------------------------- |
+| 0        | Raw verbatim source (immutable anchor)   | Created on `PutCell`; never updated   |
+| 1        | Semantic summary                         | Derived; updated only if hash matches |
+| 2        | Conflict notes and seams                 | Auto-populated on seam creation       |
+| 3        | Temporal validity window                 | Mirrors cell validity                 |
+| 4        | Procedural or action-oriented derivative | Application-derived                   |
+| 5        | User or project-specific lens            | Custom                                |
+
+## Facet structure
+
+```go
+type FacetView struct {
+    ID             int
+    DerivedContent string
+    LastRotated    time.Time
+    DerivationHash string
+}
+```
+
+**Key components:**
+
+- **ID** — Facet identifier (0-5)
+- **DerivedContent** — The facet's content
+- **LastRotated** — When this facet was last activated
+- **DerivationHash** — Hash of the source content for integrity verification
+
+## Facet lifecycle
+
+### Creation
+
+Automatic on `PutCell`. Facet 0 holds `RawContent`; other facets are lazy or derived.
+
+### Update
+
+`UpdateFacet` succeeds only if `DerivationHash` matches the current `RawContent` hash. Otherwise:
+
+- Reject the update, or
+- Create a seam and a new cell
+
+This hash discipline ensures facets are always derived from the correct source content.
+
+### Invalidation
+
+`RawContent` is immutable, so any change creates a new cell linked by seam. Old cells retain their facets for historical reference.
+
+### Rotation
+
+A simple pointer flip on `ActiveFacet`. `LastRotated` tracks freshness for cache management.
+
+## Creating a facet
+
+```go
+db.Update(func(tx *hexxladb.Tx) error {
+    coord := hexxladb.Coord{Q: 3, R: 1}
+    pk, _ := lattice.Pack(coord)
+
+    // Create a semantic summary (facet 1)
+    return tx.PutFacet(ctx, record.FacetRecord{
+        Key:            pk,
+        FacetID:        1,
+        DerivedContent: "Use testcontainers-go for Postgres integration tests",
+        DerivationHash: "sha256-of-original-content",
+    })
+})
+```
+
+## Updating a facet
+
+```go
+db.Update(func(tx *hexxladb.Tx) error {
+    coord := hexxladb.Coord{Q: 3, R: 1}
+    pk, _ := lattice.Pack(coord)
+
+    // Update only if hash matches (prevents drift)
+    return tx.UpdateFacet(ctx, record.FacetRecord{
+        Key:            pk,
+        FacetID:        1,
+        DerivedContent: "Updated summary",
+        DerivationHash: "sha256-of-original-content", // Must match current
+    })
+})
+```
+
+If the hash doesn't match, `UpdateFacet` returns an error.
+
+## Retrieving a facet
+
+```go
+db.View(func(tx *hexxladb.Tx) error {
+    coord := hexxladb.Coord{Q: 3, R: 1}
+    pk, _ := lattice.Pack(coord)
+
+    facet, ok, err := tx.GetFacet(ctx, pk, 1) // Get facet 1
+    if err != nil {
+        return err
+    }
+    if !ok {
+        return errors.New("facet not found")
+    }
+    // Use facet.DerivedContent
+})
+```
+
+## Iterating facets for a cell
+
+```go
+db.View(func(tx *hexxladb.Tx) error {
+    coord := hexxladb.Coord{Q: 3, R: 1}
+    pk, _ := lattice.Pack(coord)
+
+    return tx.AscendFacetsForCell(ctx, pk, func(facet record.FacetRecord) bool {
+        fmt.Printf("Facet %d: %s\n", facet.FacetID, facet.DerivedContent)
+        return true // continue iteration
+    })
+})
+```
+
+## Walking ring facets
+
+Load facets for all cells on a ring:
+
+```go
+center := hexxladb.Coord{Q: 3, R: 1}
+facetMask := uint8(0b00000111) // Load facets 0, 1, 2
+
+err := tx.WalkRingFacets(ctx, center, 1, facetMask, nil, func(
+    coord lattice.Coord,
+    cell record.CellRecord,
+    facets []record.FacetRecord,
+) bool {
+    // Process cell and its facets
+    return true
+})
+```
+
+## Active facet
+
+Each cell has an `ActiveFacet` field (0-5) indicating which facet is currently selected for display. Rotate between facets to show different views:
+
+```go
+// In your application code
+cell.ActiveFacet = 1 // Switch to semantic summary
+```
+
+## Use cases
+
+### Semantic summarization
+
+Facet 1 holds generated summaries of long content:
+
+- Original content in facet 0 (immutable)
+- Summary in facet 1 (derived)
+- Switch between full text and summary based on budget
+
+### Conflict tracking
+
+Facet 2 auto-populates when seams are created:
+
+- Stores conflict notes and resolution history
+- Visible when the cell is involved in a contradiction
+
+### Temporal views
+
+Facet 3 mirrors the cell's validity window:
+
+- Useful for time-bounded queries
+- Helps with MVCC snapshot filtering
+
+### Custom lenses
+
+Facet 5 is reserved for application-specific views:
+
+- Domain-specific annotations
+- User-defined perspectives
+- Project-specific transformations
+
+## See also
+
+- [Cells](/concepts/cells) — Core data units
+- [Seams](/concepts/seams) — Contradiction and supersession markers
+- [Context assembly](/api/context) — Budgeted context with facet selection

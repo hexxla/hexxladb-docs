@@ -1,0 +1,106 @@
+---
+title: "Facets"
+description: "Facet operations: PutFacet, UpdateFacet, GetFacet"
+---
+
+## PutFacet
+
+Upsert a facet record (derivation discipline as per spec).
+
+```go
+coord := hexxladb.Coord{Q: 3, R: 1}
+pk, _ := lattice.Pack(coord)
+
+err := tx.PutFacet(ctx, record.FacetRecord{
+    Key:            pk,
+    FacetID:        1, // Semantic summary
+    DerivedContent: "Use testcontainers-go for Postgres tests",
+    DerivationHash: "sha256-of-original-content",
+})
+```
+
+## UpdateFacet
+
+Requires derivation hash match; otherwise returns `ErrFacetDerivationMismatch`.
+
+```go
+err := tx.UpdateFacet(ctx, record.FacetRecord{
+    Key:            pk,
+    FacetID:        1,
+    DerivedContent: "Updated summary",
+    DerivationHash: "sha256-of-original-content", // Must match current
+})
+```
+
+This hash discipline ensures facets are always derived from the correct source content.
+
+## GetFacet
+
+Lookup by packed coordinate and facet ID.
+
+```go
+facet, ok, err := tx.GetFacet(ctx, pk, 1)
+if err != nil {
+    return err
+}
+if !ok {
+    return errors.New("facet not found")
+}
+fmt.Println(facet.DerivedContent)
+```
+
+## AscendFacetsForCell
+
+Iterate all facets at a cell key.
+
+```go
+err := tx.AscendFacetsForCell(ctx, pk, func(facet record.FacetRecord) bool {
+    fmt.Printf("Facet %d: %s\n", facet.FacetID, facet.DerivedContent)
+    return true // continue iteration
+})
+```
+
+## WalkRingFacets
+
+Load facets for all cells on a ring.
+
+```go
+center := hexxladb.Coord{Q: 3, R: 1}
+facetMask := uint8(0b00000111) // Load facets 0, 1, 2
+
+err := tx.WalkRingFacets(ctx, center, 1, facetMask, nil, func(
+    coord lattice.Coord,
+    cell record.CellRecord,
+    facets []record.FacetRecord,
+) bool {
+    // Process cell and its facets
+    return true
+})
+```
+
+Optional validity filter:
+
+```go
+asOf := time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
+err := tx.WalkRingFacets(ctx, center, 1, facetMask, &asOf, func(...) bool {
+    // Only cells valid at asOf
+    return true
+})
+```
+
+## Facet IDs
+
+Fixed in v1 (6 facet IDs: 0-5):
+
+| ID | Purpose |
+| -- | ------- |
+| 0 | Raw verbatim source (immutable anchor) |
+| 1 | Semantic summary |
+| 2 | Conflict notes and seams |
+| 3 | Temporal validity window |
+| 4 | Procedural or action-oriented derivative |
+| 5 | User or project-specific lens |
+
+## See also
+
+- [Facets](/concepts/facets) — Facet concepts and lifecycle

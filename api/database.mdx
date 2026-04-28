@@ -1,0 +1,133 @@
+---
+title: "Database"
+description: "Database lifecycle: Open, Close, Compact, and configuration"
+---
+
+## Open
+
+Opens or creates a database file. Applies WAL on startup for crash recovery.
+
+```go
+db, err := hexxladb.Open("memory.db", &hexxladb.Options{
+    EnableMVCC:         true,
+    EmbeddingDimension: 384,
+    DistanceMetric:     hexxladb.DistanceCosine,
+})
+if err != nil {
+    log.Fatal(err)
+}
+defer db.Close()
+```
+
+## Close
+
+Waits for in-flight transactions and closes the database. Idempotent for nil receiver.
+
+```go
+err := db.Close()
+```
+
+## Compact
+
+Copy-compacts an open database to a new file, reclaiming space from deleted records. Preserves all data including MVCC history.
+
+```go
+err := db.Compact(ctx, "/tmp/compacted.db")
+db.Close()
+os.Rename("/tmp/compacted.db", originalPath)
+db, _ = hexxladb.Open(originalPath, opts)
+```
+
+### CompactTo
+
+Standalone compaction from source to destination:
+
+```go
+err := hexxladb.CompactTo(ctx, srcPath, destPath, opts)
+```
+
+Destination inherits format version, MVCC flag, MaxValueBytes, and encryption from source. Encryption credentials must be supplied for encrypted sources.
+
+## Configuration options
+
+```go
+type Options struct {
+    // MVCC and temporal
+    EnableMVCC     bool
+    MVCCRetention  MVCCRetention
+
+    // Changelog
+    ChangelogEnabled bool
+
+    // Encryption
+    EncryptionKey []byte
+    Passphrase     string
+
+    // Storage
+    PageSize      int  // 4096, 8192, 16384, 65536
+    MaxValueBytes int  // 512 to 1048576
+
+    // Embeddings
+    EmbeddingDimension int
+    DistanceMetric     DistanceMetric
+
+    // Hooks
+    CellValidator  func(record.CellRecord) error
+    AfterPutCell  func(record.CellRecord)
+    AfterPutSeam  func(record.SeamRecord)
+}
+```
+
+## Runtime properties
+
+### PageSize
+
+Returns the active page size in bytes (4096 default for new databases).
+
+```go
+pageSize := db.PageSize()
+```
+
+### MaxValueBytes
+
+Returns the effective per-database max value size in bytes from the file header.
+
+```go
+maxValueBytes := db.MaxValueBytes()
+```
+
+### EmbeddingDimension
+
+Returns the configured vector dimension (0 = disabled).
+
+```go
+dim := db.EmbeddingDimension()
+```
+
+### EmbeddingMetric
+
+Returns the configured distance metric.
+
+```go
+metric := db.EmbeddingMetric()
+```
+
+## Storage limits
+
+- **Maximum key length:** 256 bytes
+- **Maximum value length:** Configurable via `MaxValueBytes` (512 to 1,048,576 bytes; default 8192)
+- **Page size:** Configurable via `PageSize` (4096 to 65536 bytes; default 4096)
+- **Compression:** DEFLATE always-on for values ≥ 64 bytes
+
+## Errors
+
+| Error | Description |
+| ----- | ----------- |
+| `ErrCorruptDatabase` | Open-time corruption (header/WAL) |
+| `ErrEncryptionKeyMismatch` | Wrong key/passphrase for encrypted database |
+
+## See also
+
+- [Transactions](/api/transactions) — Transaction methods
+- [Options](/api/options) — Configuration options
+- [Backups](/operations/backups) — Backup and compaction procedures

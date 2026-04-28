@@ -1,0 +1,213 @@
+---
+title: "MVCC"
+description: "Multi-version concurrency control and time-travel in HexxlaDB"
+---
+
+Multi-Version Concurrency Control (MVCC) enables snapshot isolation and time-travel queries in HexxlaDB. Multiple versions of data coexist, with visibility scoped by commit sequence numbers.
+
+## Overview
+
+MVCC in HexxlaDB provides:
+- **Snapshot isolation** — Readers see a consistent snapshot without blocking writers
+- **Time-travel queries** — Query the database as it was at any point in time
+- **Audit trails** — Full history of changes with changelog integration
+- **Non-blocking reads** — Read transactions never block write transactions
+
+## Enabling MVCC
+
+MVCC is enabled via options:
+
+```go
+db, err := hexxladb.Open("memory.db", &hexxladb.Options{
+    EnableMVCC: true,
+})
+```
+
+When enabled, the database uses format v2 with MVCC-specific key encoding.
+
+## Physical key encoding
+
+With MVCC enabled, version suffixes are appended to physical B+ tree keys:
+
+```
+cell/<packed_coord>#<commit_seq>
+facet/<packed_coord>/<facet_id>#<commit_seq>
+edge/<packed_from>/<packed_to>/<type>#<commit_seq>
+seam/<ulid>#<commit_seq>
+```
+
+Multiple committed versions coexist, with visibility scoped by `commit_seq`.
+
+## Timeline keys
+
+Timeline keys map wall-clock time to commit sequence numbers:
+
+```
+__meta/commit-time/<wall_nanos>/<commit_seq>
+```
+
+These enable `ViewAtTime` queries by translating wall-clock timestamps to snapshots.
+
+## Snapshot transactions
+
+### View (current snapshot)
+
+```go
+err := db.View(func(tx *hexxladb.Tx) error {
+    // Reads see the latest committed snapshot
+    cell, ok, err := tx.GetCell(ctx, pk)
+    // ...
+})
+```
+
+### ViewAt (by commit sequence)
+
+```go
+err := db.ViewAt(readSeq, func(tx *hexxladb.Tx) error {
+    // Reads see the state as of readSeq
+    cell, ok, err := tx.GetCell(ctx, pk)
+    // ...
+})
+```
+
+### ViewAtTime (by wall-clock time)
+
+```go
+asOf := time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
+err := db.ViewAtTime(asOf, func(tx *hexxladb.Tx) error {
+    // Reads see the state as of the wall-clock time
+    cell, ok, err := tx.GetCell(ctx, pk)
+    // ...
+})
+```
+
+## Write transactions
+
+Write transactions create new versions:
+
+```go
+err := db.Update(func(tx *hexxladb.Tx) error {
+    // Writes create new versions with new commit_seq
+    return tx.PutCell(ctx, record.CellRecord{
+        Key:        pk,
+        RawContent: "New content",
+        // ...
+    })
+})
+```
+
+## Version visibility
+
+Readers see versions based on their snapshot:
+- **View:** Latest committed snapshot
+- **ViewAt:** State as of specific commit sequence
+- **ViewAtTime:** State as of specific wall-clock time
+
+Older versions remain in the database until pruned.
+
+## Snapshot diff
+
+Compare two snapshots to see what changed:
+
+```go
+diff, err := db.SnapshotDiff(seqA, seqB)
+// diff contains added, modified, and removed cells
+```
+
+## Retention and pruning
+
+Configure MVCC retention:
+
+```go
+db, err := hexxladb.Open("memory.db", &hexxladb.Options{
+    EnableMVCC:     true,
+    MVCCRetention:  30 * 24 * time.Hour, // 30 days
+})
+```
+
+Prune old versions:
+
+```go
+// Prune versions older than retention window
+before := time.Now().Add(-30 * 24 * time.Hour)
+pruned, err := db.PruneCellVersions(before)
+
+// Get suggested prune sequence
+seq, err := db.SuggestedPruneBeforeSeq()
+```
+
+## MVCC statistics
+
+Query MVCC stats:
+
+```go
+stats, err := db.StatsMVCC()
+// stats contains version counts, retention info, etc.
+```
+
+## Validity windows
+
+MVCC snapshots are orthogonal to validity windows on records:
+- **MVCC:** Engine-time snapshot isolation (what the database knew at commit time)
+- **Validity:** Real-world time range (when the fact was true)
+
+Both can be combined for powerful temporal queries.
+
+## Changelog integration
+
+MVCC works with the logical changefeed for audit trails:
+
+```go
+db, err := hexxladb.Open("memory.db", &hexxladb.Options{
+    EnableMVCC:       true,
+    ChangelogEnabled: true,
+})
+
+// Read changelog since a point
+entries, err := db.ReadChangelogSince(seq)
+```
+
+## Performance considerations
+
+- **Read performance:** Unaffected by MVCC (snapshot reads are fast)
+- **Write performance:** Slight overhead for version tracking
+- **Storage:** Additional space for old versions (mitigated by retention and pruning)
+- **Compaction:** Essential for reclaiming space from old versions
+
+## Use cases
+
+### Audit trails
+
+Track exactly what the database knew at any point:
+
+```go
+asOf := time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
+db.ViewAtTime(asOf, func(tx *hexxladb.Tx) error {
+    // Query the database as it was at that time
+})
+```
+
+### Debugging
+
+Reproduce issues by querying the database state at the time of the error:
+
+```go
+err := db.ViewAt(errorSeq, func(tx *hexxladb.Tx) error {
+    // Inspect state at the time of the error
+})
+```
+
+### Time-travel queries
+
+Explore how data evolved over time:
+
+```go
+diff, err := db.SnapshotDiff(seqA, seqB)
+// See what changed between two points
+```
+
+## See also
+
+- [Storage layout](/storage/layout) — Physical key encoding with MVCC suffixes
+- [Changelog](/operations/changefeed) — Logical changefeed for audit trails
+- [API reference](/api/mvcc) — MVCC API methods

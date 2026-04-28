@@ -1,0 +1,186 @@
+---
+title: "Coordinates"
+description: "Hexagonal addressing system in HexxlaDB"
+---
+
+HexxlaDB uses a hexagonal coordinate grid where every data cell lives at a specific coordinate. This spatial addressing enables deterministic ring walks, efficient neighborhood queries, and physical locality in the on-disk format.
+
+## Axial coordinates
+
+Cells are addressed by axial coordinates `(q, r)` with implicit cube coordinate `s = -q - r`:
+
+```go
+type Coord struct {
+    Q int
+    R int
+}
+```
+
+**Key properties:**
+
+- Each cell has exactly six symmetric neighbors
+- Ring walks and radius-bounded expansion are deterministic
+- Distance between cells is exact and computable
+
+## Hex distance formula
+
+The distance between two cells is derived from cube Manhattan distance:
+
+```text
+distance(a, b) = (abs(a.q - b.q) + abs(a.r - b.r) + abs((a.q + a.r) - (b.q + b.r))) / 2
+```
+
+This returns the exact number of steps between any two cells and defines ring boundaries precisely.
+
+## Coordinate methods
+
+The `Coord` type provides several utility methods:
+
+```go
+coord := hexxladb.Coord{Q: 3, R: 1}
+
+// Convert to cube coordinates
+cube := coord.Cube() // Returns struct {X, Y, Z int}
+
+// Calculate distance to another coordinate
+dist := coord.Distance(otherCoord)
+
+// Get the six neighbors
+neighbors := coord.Neighbors()
+
+// Get all cells at a specific ring radius
+ring := coord.Ring(2) // Returns coordinates at distance 2
+```
+
+## Morton packing
+
+For storage, coordinates are Morton-encoded into a 128-bit `PackedCoord`:
+
+```go
+pk, err := lattice.Pack(coord) // Pack (q, r) into 128-bit key
+coord, err := lattice.Unpack(pk) // Unpack back to (q, r)
+```
+
+**Why Morton encoding?**
+
+- Preserves spatial locality in the B+ tree
+- Nearby coordinates have nearby keys
+- Ring walks become efficient prefix scans
+- Scales with ring area, not database size
+
+## Ring walks
+
+A ring walk visits all cells at a fixed distance from a center:
+
+```go
+center := hexxladb.Coord{Q: 3, R: 1}
+
+// Walk ring at distance 2
+err := tx.WalkRing(ctx, center, 2, func(coord lattice.Coord, data []byte, ok bool) bool {
+    if !ok {
+        return true // Cell doesn't exist, continue
+    }
+    // Process cell
+    return true // Continue iteration
+})
+```
+
+Ring walks are deterministic:
+
+- Same order every time
+- Axial spiral order within each ring starting from positive-q direction
+- Stable across database size
+
+## Ring walks with validity filtering
+
+For time-travel queries, filter by validity window:
+
+```go
+asOf := time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
+
+err := tx.WalkRingAt(ctx, center, 2, asOf, func(coord lattice.Coord, cell record.CellRecord) bool {
+    // Only cells valid at asOf
+    return true
+})
+```
+
+## Context loading
+
+Load a neighborhood around a center coordinate:
+
+```go
+center := hexxladb.Coord{Q: 3, R: 1}
+
+cells, err := tx.LoadContext(ctx, center, 3, 50)
+// maxR: 3 (load rings 0, 1, 2, 3)
+// maxCells: 50 (stop after 50 cells)
+```
+
+`LoadContext` returns cells in concentric rings from center outward, then axial spiral order within each ring.
+
+## Coordinate selection strategies
+
+Choosing where to place cells is application-specific:
+
+### Semantic clustering
+
+Place semantically related content near each other:
+
+- Architecture decisions in one region
+- Bug reports in another
+- User preferences in a third
+
+### Temporal clustering
+
+Place temporally related content together:
+
+- Session-based regions
+- Time-based rings
+
+### Random placement
+
+For simple use cases, random coordinates work fine:
+
+- Ring walks still provide locality
+- HNSW embedding search finds relevant content
+
+### Hybrid approaches
+
+Combine strategies:
+
+- Use embeddings for semantic search
+- Use ring walks for context assembly
+- Use edges for explicit relationships
+
+## Coordinate arithmetic
+
+```go
+// Add two coordinates
+sum := coordA.Add(coordB)
+
+// Subtract coordinates
+diff := coordA.Sub(coordB)
+
+// Scale a coordinate
+scaled := coord.Scale(2)
+
+// Rotate a coordinate (60-degree increments)
+rotated := coord.Rotate(1) // Rotate 60 degrees clockwise
+```
+
+## Why hexagonal?
+
+A hexagonal lattice provides:
+
+- **6-neighbor connectivity** — Natural for neighborhood queries
+- **Natural ring enumeration** — Easy to define concentric rings
+- **Exact deterministic distance** — No floating-point ambiguity
+- **Hierarchical clustering** — Super-hex regions for multi-level summarization
+
+These properties make locality, neighborhood traversal, and summarization first-class and efficient.
+
+## See also
+
+- [Cells](/concepts/cells) — Core data units at coordinates
+- [Context assembly](/api/context) — Budgeted neighborhood loading
+- [Storage layout](/storage/layout) — How coordinates are encoded on disk

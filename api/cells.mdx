@@ -1,0 +1,146 @@
+---
+title: "Cells"
+description: "Cell operations: PutCell, GetCell, DeleteCell, and secondary indexes"
+---
+
+## PutCell
+
+Stores a cell with its primary key and secondary indexes (source, time, tag).
+
+```go
+coord := hexxladb.Coord{Q: 3, R: 1}
+pk, _ := lattice.Pack(coord)
+
+err := tx.PutCell(ctx, record.CellRecord{
+    Key:        pk,
+    RawContent: "Use testcontainers-go for integration tests.",
+    Tags:       []string{"fact", "testing", "database"},
+    Provenance: record.ProvenanceWire{
+        SourceID:   "session-2",
+        Confidence: 0.95,
+    },
+    Validity: record.ValidityWire{
+        ValidFrom: &startTime,
+    },
+})
+```
+
+## GetCell
+
+Retrieves the visible cell at a packed coordinate.
+
+```go
+cell, ok, err := tx.GetCell(ctx, pk)
+if err != nil {
+    return err
+}
+if !ok {
+    return errors.New("cell not found")
+}
+fmt.Println(cell.RawContent)
+```
+
+## DeleteCell
+
+Removes a cell and all associated data (secondary indexes, facets, outbound edges). Idempotent — deleting a non-existent cell returns nil. Seams are NOT removed.
+
+```go
+err := tx.DeleteCell(ctx, pk)
+```
+
+MVCC: Creates a tombstone. Cascades to remove the cell's embedding and HNSW node automatically.
+
+## Secondary indexes
+
+### AscendCellsBySource
+
+Scan cells by source ID.
+
+```go
+err := tx.AscendCellsBySource(ctx, "session-2", func(cell record.CellRecord) bool {
+    fmt.Printf("Cell: %s\n", cell.RawContent)
+    return true // continue iteration
+})
+```
+
+### AscendCellsInTimeBucket
+
+Scan cells in a UTC week bucket.
+
+```go
+bucket := timeBucketFromTime(t) // Your function to compute bucket
+err := tx.AscendCellsInTimeBucket(ctx, bucket, func(cell record.CellRecord) bool {
+    fmt.Printf("Cell: %s\n", cell.RawContent)
+    return true
+})
+```
+
+### AscendCellsByTag
+
+Scan cells by tag.
+
+```go
+err := tx.AscendCellsByTag(ctx, "testing", func(cell record.CellRecord) bool {
+    fmt.Printf("Cell: %s\n", cell.RawContent)
+    return true
+})
+```
+
+### AscendDistinctTags
+
+List distinct tag strings visible at this snapshot.
+
+```go
+err := tx.AscendDistinctTags(ctx, func(tag string) bool {
+    fmt.Println(tag)
+    return true
+})
+```
+
+### ListExistingTopics
+
+Return sorted distinct tags (topic names) for tools.
+
+```go
+tags, err := tx.ListExistingTopics(ctx)
+```
+
+## Batch operations
+
+### BatchPutCells
+
+Batched multi-cell write with progress and continue-on-error.
+
+```go
+result, err := db.BatchPutCells(ctx, cells, hexxladb.BatchPutCellOptions{
+    BatchSize: 1000,
+    OnProgress: func(written, total int) {
+        fmt.Printf("Progress: %d/%d\n", written, total)
+    },
+    ContinueOnError: true,
+})
+```
+
+## Cell templates
+
+Factory functions for common cell types:
+
+```go
+// User message
+cell := hexxladb.NewUserMessageCell(coord, content, sourceID, confidence)
+
+// Assistant response
+cell := hexxladb.NewAssistantResponseCell(coord, content, sourceID, confidence)
+
+// System prompt
+cell := hexxladb.NewSystemPromptCell(coord, content)
+
+// Extracted fact
+cell := hexxladb.NewFactCell(coord, content, category)
+```
+
+## See also
+
+- [Cells](/concepts/cells) — Core memory units
+- [Facets](/api/facets) — Facet operations
+- [Edges](/api/edges) — Edge operations

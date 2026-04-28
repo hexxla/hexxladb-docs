@@ -1,0 +1,51 @@
+---
+title: "Health"
+description: "Database health check and integrity verification"
+---
+
+## HealthCheck
+
+Integrity scan: cell count, seam resolution summary, orphaned seam detection, index consistency, MVCC stats.
+
+```go
+report, err := db.HealthCheck(ctx, hexxladb.DefaultHealthCheckConfig)
+```
+
+## HealthCheckConfig
+
+```go
+type HealthCheckConfig struct {
+    CheckOrphans      bool
+    CheckTagIndex     bool
+    CheckSourceIndex  bool
+    MaxErrors         int
+}
+```
+
+`DefaultHealthCheckConfig` returns config with all checks enabled.
+
+## HealthReport
+
+```go
+type HealthReport struct {
+    CellCount          int
+    SeamCount          int
+    SeamsResolved      int
+    SeamsUnresolved    int
+    OrphanedSeams      int
+    TagIndexErrors     int
+    SourceIndexErrors  int
+    MVCCStats          MVCCStats
+    Warnings           []string
+}
+```
+
+## Health check workflow
+
+1. Run health check before releases
+2. Run after storage/MVCC changes
+3. Run periodically in production for monitoring
+
+## See also
+
+- [Backups](/operations/backups) — Backup and restore procedures

@@ -1,0 +1,156 @@
+---
+title: "Quick start"
+description: "Get started with HexxlaDB in minutes"
+---
+
+## Installation
+
+```bash
+go get github.com/hexxla/hexxladb
+```
+
+## Quick start
+
+The following walkthrough shows a production workflow for LLM memory and context assembly — one of the many use cases HexxlaDB supports. Every code block is copy-pasteable.
+
+### 1. Open a database
+
+```go
+db, err := hexxladb.Open("memory.db", &hexxladb.Options{
+    EnableMVCC:         true,  // snapshot isolation + time-travel
+    EmbeddingDimension: 384,   // vector size (e.g. all-MiniLM-L6-v2)
+    DistanceMetric:     hexxladb.DistanceCosine,
+})
+if err != nil {
+    log.Fatal(err)
+}
+defer db.Close()
+```
+
+### 2. Store a record with its embedding
+
+Every record gets a cell with content, tags, provenance, and optionally a vector embedding from your model of choice.
+
+```go
+db.Update(func(tx *hexxladb.Tx) error {
+    coord := hexxladb.Coord{Q: 3, R: 1}
+    pk, _ := lattice.Pack(coord)
+
+    // Store the record
+    err := tx.PutCell(ctx, record.CellRecord{
+        Key:        pk,
+        RawContent: "Use testcontainers-go for integration tests with real Postgres.",
+        Tags:       []string{"fact", "testing", "database", "best-practice"},
+        Provenance: record.ProvenanceWire{SourceID: "session-2", Confidence: 0.95},
+    })
+    if err != nil {
+        return err
+    }
+
+    // Store its embedding (HNSW index is maintained automatically)
+    return tx.PutEmbedding(pk, vectorFromYourModel)
+})
+```
+
+### 3. Find relevant records by meaning
+
+When a new query arrives, embed it and search. HexxlaDB uses the HNSW graph for fast approximate nearest-neighbor lookup, then applies your filters as post-predicates.
+
+```go
+db.View(func(tx *hexxladb.Tx) error {
+    results, err := tx.QueryCells(ctx, hexxladb.CellQuery{
+        Embedding:     queryVector,          // "How do I test my HTTP handlers?"
+        ExcludeTags:   []string{"preference"}, // keep preferences separate
+        MinConfidence: 0.5,
+        MaxResults:    8,
+        SortBy:        hexxladb.SortByScore,
+    })
+    // results: ranked cells with score, content, tags, provenance
+})
+```
+
+### 4. Retrieve user preferences
+
+Preferences are just cells with a `"preference"` tag. Query them separately so they always appear in your context, regardless of what the user is asking about.
+
+```go
+db.View(func(tx *hexxladb.Tx) error {
+    prefs, err := tx.QueryCells(ctx, hexxladb.CellQuery{
+        RequireTags: []string{"preference"},
+        MaxResults:  5,
+        SortBy:      hexxladb.SortByConfidence,
+    })
+    // prefs: "concise responses", "table-driven tests", etc.
+})
+```
+
+### 5. Assemble a budgeted context window
+
+Take the top search results as seed coordinates and expand outward. The assembler walks concentric rings, fills your budget, and automatically replaces superseded cells with their successors.
+
+```go
+db.View(func(tx *hexxladb.Tx) error {
+    // Use the top-3 search results as seeds
+    seeds := []hexxladb.Coord{results[0].Cell.Coord, results[1].Cell.Coord, results[2].Cell.Coord}
+
+    pack, err := tx.LoadContextPackFrom(ctx,
+        2,     // max ring radius
+        4096,  // budget
+        hexxladb.ByteLenBudgeter{},
+        hexxladb.LoadContextBudgetConfig{
+            FilterSuperseded: true,  // old preferences auto-replaced by new ones
+            IncludeSeams:     true,  // surface contradictions for the system
+        },
+        seeds...,
+    )
+    // pack.Cells: ordered context, pack.TotalTokens: fits your budget
+})
+```
+
+### 6. Track contradictions and preference changes
+
+When preferences change, HexxlaDB doesn't silently overwrite — it records the relationship so context assembly can handle it automatically.
+
+```go
+db.Update(func(tx *hexxladb.Tx) error {
+    // User now wants verbose explanations (previously wanted brevity)
+    return tx.MarkSupersedes(newPrefCoord, oldPrefCoord, "User changed communication preference")
+})
+
+// Or flag an outright contradiction between two facts
+db.Update(func(tx *hexxladb.Tx) error {
+    return tx.MarkConflict(cellA, cellB, "Conflicting architecture recommendations")
+})
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+
+<Card title="Learn core concepts" icon="book-open" href="/concepts/cells">
+  Understand cells, seams, edges, facets, and coordinates.
+</Card>
+
+<Card title="API reference" icon="code" href="/api/database">
+  Explore the complete API surface.
+</Card>
+
+<Card title="Storage internals" icon="database" href="/storage/layout">
+  Learn about the storage layout and key encoding.
+</Card>
+
+<Card title="Production operations" icon="settings" href="/operations/backups">
+  Backups, encryption, changefeed, and retention.
+</Card>
+
+</CardGroup>
+
+<Note>
+  **That's the full pipeline.** Embed → search → filter → assemble → output.
+  Every step runs in-process, deterministically, with no network calls to the
+  database layer. See the [llm_context_engine
+  example](https://github.com/hexxla/hexxladb/tree/main/examples/llm_context_engine)
+  for a complete runnable version of this LLM memory workflow with advanced
+  patterns including multi-signal retrieval, preference supersession, and full
+  prompt assembly.
+</Note>

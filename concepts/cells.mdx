@@ -1,0 +1,157 @@
+---
+title: "Cells"
+description: "Core data unit in HexxlaDB"
+---
+
+A **Cell** is the fundamental data unit in HexxlaDB. It represents a fact, message, preference, document chunk, or any record stored at a hex coordinate with content, tags, provenance, confidence, and a validity window.
+
+## Cell structure
+
+A Cell contains:
+
+```go
+type Cell struct {
+    Coord        Coord
+    RawContent   string
+    Provenance   Provenance
+    Validity     ValidityWindow
+    Tags         []string
+    ClusterHint  *Coord
+    Facets       map[int]FacetView
+    ActiveFacet  int
+    Edges        []Edge
+    Seams        []SeamRef
+}
+```
+
+**Key components:**
+
+- **Coord** — Hexagonal coordinate `(q, r)` where the cell lives on the lattice
+- **RawContent** — The actual text content of the record
+- **Provenance** — Source ID, confidence score, and timestamps
+- **ValidityWindow** — Time range during which this cell is considered valid
+- **Tags** — String labels for categorization and filtering
+- **Facets** — Derived views or summaries (6 facet IDs: 0-5)
+- **ActiveFacet** — Which facet is currently selected for display
+- **Edges** — Directed relationships to other cells
+- **Seams** — References to contradiction markers involving this cell
+
+## Provenance
+
+Every cell tracks where it came from and how reliable it is:
+
+```go
+type Provenance struct {
+    SourceID   string
+    Confidence float64
+    CreatedAt  time.Time
+    UpdatedAt  time.Time
+}
+```
+
+- **SourceID** — Identifies the origin (e.g., "session-2", "user-123", "doc-456")
+- **Confidence** — Float between 0.0 and 1.0 indicating reliability
+- **CreatedAt / UpdatedAt** — Timestamps for lifecycle tracking
+
+## Validity window
+
+Cells support bi-temporal validity:
+
+```go
+type ValidityWindow struct {
+    ValidFrom *time.Time
+    ValidTo   *time.Time
+}
+```
+
+Both fields are optional. A cell with `nil` for both is always valid. This enables:
+
+- Time-travel queries via MVCC snapshots
+- Future-dated records
+- Expiring preferences or facts
+
+## Tags
+
+Tags are string labels that enable secondary indexing and filtering:
+
+```go
+Tags: []string{"fact", "testing", "database", "best-practice"}
+```
+
+Common tag patterns:
+
+- `"fact"` — Objective information
+- `"preference"` — User preferences or settings
+- `"architecture"` — Design decisions
+- `"bug"` — Known issues or workarounds
+
+Tags are indexed automatically for fast lookup via `AscendCellsByTag`.
+
+## Immutability
+
+The `RawContent` of a cell is immutable. To update a record:
+
+1. Create a new cell at a new coordinate
+2. Link it to the original via a seam
+3. Mark the relationship as supersession (for preferences) or conflict (for contradictions)
+
+This ensures full audit trails and enables MVCC time-travel.
+
+## Storing a cell
+
+```go
+db.Update(func(tx *hexxladb.Tx) error {
+    coord := hexxladb.Coord{Q: 3, R: 1}
+    pk, _ := lattice.Pack(coord)
+
+    return tx.PutCell(ctx, record.CellRecord{
+        Key:        pk,
+        RawContent: "Use testcontainers-go for integration tests with real Postgres.",
+        Tags:       []string{"fact", "testing", "database", "best-practice"},
+        Provenance: record.ProvenanceWire{SourceID: "session-2", Confidence: 0.95},
+    })
+})
+```
+
+## Retrieving a cell
+
+```go
+db.View(func(tx *hexxladb.Tx) error {
+    coord := hexxladb.Coord{Q: 3, R: 1}
+    pk, _ := lattice.Pack(coord)
+
+    cell, ok, err := tx.GetCell(ctx, pk)
+    if err != nil {
+        return err
+    }
+    if !ok {
+        return errors.New("cell not found")
+    }
+    // Use cell...
+})
+```
+
+## Deleting a cell
+
+```go
+db.Update(func(tx *hexxladb.Tx) error {
+    coord := hexxladb.Coord{Q: 3, R: 1}
+    pk, _ := lattice.Pack(coord)
+    return tx.DeleteCell(ctx, pk)
+})
+```
+
+`DeleteCell` removes the cell and all associated data:
+
+- Secondary indexes (source, time, tag)
+- Facets
+- Outbound edges
+
+Seams are **not** removed — they remain as historical records.
+
+## See also
+
+- [Seams](/concepts/seams) — Contradiction and supersession markers
+- [Facets](/concepts/facets) — Derived views bound to cells
+- [Edges](/concepts/edges) — Directed relationships between cells
+- [Coordinates](/concepts/coordinates) — Hexagonal addressing system

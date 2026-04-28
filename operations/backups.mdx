@@ -1,0 +1,102 @@
+---
+title: "Backups"
+description: "Backup and restore procedures for HexxlaDB"
+---
+
+## Files on disk
+
+HexxlaDB creates two files:
+
+- **Primary database** — path passed to `Open` (e.g., `/var/lib/app/data.db`)
+- **Write-ahead log** — `{primary}-wal` (same directory)
+
+Both files matter for durability: the engine appends redo records to the WAL, then applies them to the primary. After a clean shutdown the WAL may be truncated; after a crash, `Open` replays pending WAL records into the primary.
+
+## Backup strategies
+
+### Preferred: Close and copy
+
+Close the database so files are consistent, then copy both primary and WAL:
+
+```go
+db.Close()
+// Copy both memory.db and memory.db-wal
+```
+
+Or copy the entire directory after close.
+
+### Filesystem snapshots
+
+Snapshot the volume containing both files at the same logical point in time. This is safe for hot backups.
+
+**Warning:** Copying only the primary without the WAL (or mixing files from different times) can yield corruption or lost data.
+
+### Live copy
+
+Live copy without application cooperation is not documented as safe. Use application-level export if you need hot backup.
+
+## Restore procedures
+
+### From backup
+
+1. Stop the application
+2. Restore both primary and WAL files from the same backup instant
+3. Start the application
+4. Verify with read probes (`GetCell`, `StatsMVCC`)
+
+### After crash
+
+HexxlaDB automatically recovers from crash on `Open` by replaying the WAL. No manual intervention needed unless files are corrupted.
+
+## Compaction
+
+The engine uses an extend-only page allocator: deleted or pruned records reclaim logical space inside the B+ tree, but the primary file length does not shrink automatically. Expect monotonic file growth under churn until you compact.
+
+### Compact to new file
+
+```go
+err := db.Compact(ctx, "/tmp/compacted.db")
+db.Close()
+os.Rename("/tmp/compacted.db", originalPath)
+db, _ = hexxladb.Open(originalPath, opts)
+```
+
+### Standalone compaction
+
+```go
+err := hexxladb.CompactTo(ctx, srcPath, destPath, opts)
+```
+
+### Stripping old MVCC versions
+
+`Compact` copies tombstones and old versions verbatim. To reclaim that space, prune first:
+
+```go
+db.PruneCellVersions(beforeSeq, 100_000) // remove stale versions
+db.Compact(ctx, destPath)                // rewrite without dead pages
+```
+
+### Compaction notes
+
+- Destination inherits format version, MVCC flag, `MaxValueBytes`, and encryption from source
+- Encryption credentials must be supplied via `opts` for encrypted sources
+- Context cancellation removes partial destination on abort
+- Destination does not carry over the source changelog file
+
+## Backup drill
+
+1. `Close` the database (or stop the sole writer)
+2. Copy primary and `{primary}-wal` together from the same instant
+3. Restore on a staging host, `Open`, run read probes (`GetCell`, `StatsMVCC`)
+
+## Crash recovery drill
+
+1. Kill the embedding process during an active `Update` (SIGKILL)
+2. `Open` the same path; verify WAL replay succeeds and `View` reads match expectations
+3. If `ErrCorruptDatabase`: restore from last known-good primary + WAL pair
+
+## See also
+
+- [Encryption](/operations/encryption) — At-rest encryption
+- [Retention](/operations/retention) — MVCC retention and pruning
+- [Changelog](/operations/changefeed) — Logical changefeed for audit trails

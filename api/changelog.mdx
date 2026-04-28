@@ -1,0 +1,67 @@
+---
+title: "Changelog"
+description: "Logical changefeed for audit trails and CDC"
+---
+
+## ReadChangelogSince
+
+Read changelog entries from a commit sequence. Requires `Options.ChangelogEnabled`.
+
+```go
+entries, err := db.ReadChangelogSince(seq)
+for _, entry := range entries {
+    fmt.Printf("Op: %s, Key: %s\n", entry.Op, entry.Key)
+}
+```
+
+## ReadChangelogFiltered
+
+Filtered read by op codes and/or key prefix.
+
+```go
+filter := hexxladb.ChangelogFilter{
+    Ops:       []byte{hexxladb.ChangelogOpPutCell, hexxladb.ChangelogOpPutSeam},
+    KeyPrefix: []byte("cell/"),
+}
+entries, err := db.ReadChangelogFiltered(ctx, seq, filter)
+```
+
+## ChangelogFilter
+
+```go
+type ChangelogFilter struct {
+    Ops       []byte   // Op codes to include
+    KeyPrefix []byte   // Key prefix filter
+}
+```
+
+## ChangelogRecord
+
+Typed alias of internal record.
+
+```go
+type ChangelogRecord struct {
+    Seq       uint64
+    Op        byte
+    Key       []byte
+    Value     []byte
+    Timestamp int64
+}
+```
+
+## Op codes
+
+Stable op codes:
+
+| Op code | Description |
+| ------- | ----------- |
+| `ChangelogOpPutCell` | Cell put operation |
+| `ChangelogOpPutSeam` | Seam put operation |
+| `ChangelogOpResolveSeam` | Seam resolution |
+| `ChangelogOpPutFacet` | Facet put operation |
+| `ChangelogOpPutEdge` | Edge put operation |
+| `ChangelogOpDeleteCell` | Cell delete operation |
+
+## See also
+
+- [Changelog](/operations/changefeed) — Changelog concepts and use cases

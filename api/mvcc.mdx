@@ -1,0 +1,96 @@
+---
+title: "MVCC"
+description: "MVCC statistics, retention, and pruning APIs"
+---
+
+## StatsMVCC
+
+Counters for versioned rows.
+
+```go
+stats, err := db.StatsMVCC()
+fmt.Printf("CommitSeq: %d\n", stats.CommitSeq)
+fmt.Printf("LogicalCellCount: %d\n", stats.LogicalCellCount)
+fmt.Printf("VersionedRowCount: %d\n", stats.VersionedRowCount)
+```
+
+## SuggestedPruneBeforeSeq
+
+Policy from `MVCCRetention`.
+
+```go
+beforeSeq, err := db.SuggestedPruneBeforeSeq()
+// Returns the suggested sequence based on retention policy
+```
+
+## PruneCellVersions
+
+Delete stale cell versions before `beforeSeq`.
+
+```go
+pruned, err := db.PruneCellVersions(beforeSeq, 100_000)
+// Returns count of rows removed
+```
+
+## PruneCellVersionsByProfile
+
+Same with profile-driven `maxDelete`.
+
+```go
+plan := hexxladb.MVCCPrunePlan{
+    Profile: hexxladb.PruneProfileBalanced,
+}
+pruned, err := db.PruneCellVersionsByProfile(plan)
+```
+
+Profiles:
+- `PruneProfileLowLatency` — Aggressive pruning, minimal history
+- `PruneProfileBalanced` — Default balance
+- `PruneProfileLongHistory` — Conservative pruning, more history
+
+## PruneScheduler
+
+Operator-driven periodic prune helper.
+
+```go
+scheduler := hexxladb.NewPruneScheduler(db)
+pruned, err := scheduler.Tick(ctx)
+// One bounded pass — call from your own timer
+```
+
+No background goroutine runs inside the library. You control when pruning happens.
+
+## MVCCStats
+
+```go
+type MVCCStats struct {
+    CommitSeq         uint64
+    LogicalCellCount  uint64
+    VersionedRowCount uint64
+}
+```
+
+## MVCCPruneProfile
+
+```go
+type MVCCPruneProfile int
+
+const (
+    PruneProfileLowLatency MVCCPruneProfile = iota
+    PruneProfileBalanced
+    PruneProfileLongHistory
+)
+```
+
+## GroupWALStats
+
+Group-WAL flusher metrics (when group commit is configured).
+
+```go
+stats, err := db.GroupWALStats()
+```
+
+## See also
+
+- [MVCC](/storage/mvcc) — MVCC concepts and time-travel
+- [Retention](/operations/retention) — Retention policies and pruning

@@ -1,0 +1,201 @@
+---
+title: "Options"
+description: "Configuration options for opening a database"
+---
+
+## Options structure
+
+```go
+type Options struct {
+    // MVCC and temporal
+    EnableMVCC     bool
+    MVCCRetention  MVCCRetention
+
+    // Changelog
+    ChangelogEnabled bool
+
+    // Encryption
+    EncryptionKey []byte
+    Passphrase     string
+
+    // Storage
+    PageSize      int
+    MaxValueBytes int
+
+    // Embeddings
+    EmbeddingDimension int
+    DistanceMetric     DistanceMetric
+
+    // Hooks
+    CellValidator  func(record.CellRecord) error
+    AfterPutCell  func(record.CellRecord)
+    AfterPutSeam  func(record.SeamRecord)
+}
+```
+
+## MVCC options
+
+### EnableMVCC
+
+Enables multi-version concurrency control for snapshot isolation and time-travel queries.
+
+```go
+Options{
+    EnableMVCC: true,
+}
+```
+
+When enabled, the database uses format v2 with MVCC-specific key encoding.
+
+### MVCCRetention
+
+Configures how much commit history to retain for prune suggestions.
+
+```go
+Options{
+    EnableMVCC: true,
+    MVCCRetention: hexxladb.MVCCRetention{
+        RetainCommitsBehindHead: 1000, // Keep 1000 commits
+    },
+}
+```
+
+Retention is in commits, not wall-clock time. Zero (default) disables automatic suggestions.
+
+## Changelog options
+
+### ChangelogEnabled
+
+Enables the logical changefeed for audit trails and CDC.
+
+```go
+Options{
+    ChangelogEnabled: true,
+}
+```
+
+Creates a sidecar file `{primary}-changelog` that records all mutations.
+
+## Encryption options
+
+### EncryptionKey
+
+Raw 32-byte encryption key for AES-256-XTS.
+
+```go
+Options{
+    EncryptionKey: []byte("32-byte-raw-encryption-key"),
+}
+```
+
+### Passphrase
+
+Passphrase for key derivation using Argon2id and HKDF-SHA256.
+
+```go
+Options{
+    Passphrase: "your-passphrase-here",
+}
+```
+
+Use either `EncryptionKey` or `Passphrase`, not both.
+
+## Storage options
+
+### PageSize
+
+Page size for the B+ tree. Accepted values: 4096, 8192, 16384, 65536 bytes. Default: 4096.
+
+```go
+Options{
+    PageSize: 8192, // 8 KiB pages
+}
+```
+
+Smaller pages reduce wasted space for small databases. Larger pages improve throughput for large values.
+
+### MaxValueBytes
+
+Maximum value length per database. Accepted values: 512 to 1,048,576 bytes. Default: 8192.
+
+```go
+Options{
+    MaxValueBytes: 16384, // 16 KiB max value
+}
+```
+
+Values exceeding the page's inline threshold are stored in overflow pages automatically.
+
+## Embedding options
+
+### EmbeddingDimension
+
+Fixed vector dimension for new databases. 0 = disabled. Immutable after creation.
+
+```go
+Options{
+    EmbeddingDimension: 384, // e.g., all-MiniLM-L6-v2
+}
+```
+
+### DistanceMetric
+
+Similarity function for embedding search.
+
+```go
+Options{
+    EmbeddingDimension: 384,
+    DistanceMetric:     hexxladb.DistanceCosine,
+}
+```
+
+Available metrics:
+- `DistanceCosine` (default) — Cosine similarity, range [-1, 1]
+- `DistanceDotProduct` — Raw dot product, assumes normalized vectors
+- `DistanceL2` — Euclidean distance, inverted for ranking
+
+## Hooks
+
+### CellValidator
+
+Called before writing a cell to validate or reject it.
+
+```go
+Options{
+    CellValidator: func(rec record.CellRecord) error {
+        if len(rec.RawContent) == 0 {
+            return errors.New("content cannot be empty")
+        }
+        return nil
+    },
+}
+```
+
+### AfterPutCell
+
+Called after successfully writing a cell.
+
+```go
+Options{
+    AfterPutCell: func(rec record.CellRecord) {
+        log.Printf("Cell written at %s", rec.Key)
+    },
+}
+```
+
+### AfterPutSeam
+
+Called after successfully writing a seam.
+
+```go
+Options{
+    AfterPutSeam: func(rec record.SeamRecord) {
+        log.Printf("Seam created: %s", rec.ID)
+    },
+}
+```
+
+## See also
+
+- [Database](/api/database) — Database lifecycle
+- [Embeddings](/api/embeddings) — Vector search configuration

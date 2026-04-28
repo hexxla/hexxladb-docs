@@ -1,0 +1,100 @@
+---
+title: "Query"
+description: "Composable query engine with hybrid predicates"
+---
+
+## QueryCells
+
+Execute a `CellQuery` against the snapshot. Planner picks cheapest index; remaining predicates applied in-memory.
+
+```go
+results, err := tx.QueryCells(ctx, hexxladb.CellQuery{
+    Query:          "integration test",
+    RequireTags:    []string{"fact", "testing"},
+    ExcludeTags:    []string{"preference"},
+    SourceID:       "session-2",
+    MinConfidence:  0.5,
+    MaxConfidence:  1.0,
+    After:          &startTime,
+    Before:         &endTime,
+    Center:         &centerCoord,
+    Radius:         3,
+    MaxResults:     10,
+    SortBy:         hexxladb.SortByScore,
+    Explain:        true,
+})
+```
+
+All predicate fields are AND-combined; zero/empty values are ignored.
+
+## CellQuery fields
+
+| Field | Description |
+| ----- | ----------- |
+| `Query` | Full-text search query |
+| `RequireTags` | Tags that must all be present (AND) |
+| `AnyTags` | Tags where at least one must be present (OR) |
+| `ExcludeTags` | Tags that must not be present (NOT) |
+| `SourceID` | Filter by source ID |
+| `MinConfidence` | Minimum confidence threshold |
+| `MaxConfidence` | Maximum confidence threshold |
+| `After` | Filter by `ValidFrom` (after this time) |
+| `Before` | Filter by `ValidFrom` (before this time) |
+| `Center` | Spatial query center coordinate |
+| `Radius` | Spatial query radius |
+| `Embedding` | Vector for ANN-accelerated seed selection |
+| `MaxResults` | Maximum results to return |
+| `MaxScanRows` | Maximum rows to scan |
+| `SortBy` | Sort order |
+| `Explain` | Return explanation string |
+
+## Sort order
+
+| Sort order | Description |
+| ---------- | ----------- |
+| `SortByScore` | Sort by composite score (default) |
+| `SortByConfidence` | Sort by confidence |
+| `SortByRecency` | Sort by creation time |
+| `SortByCoord` | Sort by coordinate |
+
+## Query planner index selection
+
+The planner picks the cheapest index based on the query:
+
+| Condition | Primary index |
+| --------- | ------------- |
+| `RequireTags` non-empty | `tag/` secondary index |
+| `SourceID` set | `source/` secondary index |
+| `After` or `Before` set | `time/` week-bucket index |
+| `Center`+`Radius` set | Ring walk around `Center` |
+| `Embedding` set | HNSW graph (ANN search) |
+| Fallback | Full scan (ring walk from origin, radius 32) |
+
+## Temporal queries
+
+`After`/`Before` filter on cell `ValidFrom`. Cells with no `ValidFrom` are excluded from any temporal query. Uses the existing `time/` weekly-bucket index.
+
+```go
+startTime := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+endTime := time.Now()
+
+results, err := tx.QueryCells(ctx, hexxladb.CellQuery{
+    After:  &startTime,
+    Before: &endTime,
+})
+```
+
+## CellQueryResult
+
+```go
+type CellQueryResult struct {
+    Cell        CellView
+    Score       float64
+    Explanation string // when Explain=true
+}
+```
+
+## See also
+
+- [Search](/api/search) — Content search wrapper
+- [Cells](/api/cells) — Cell operations

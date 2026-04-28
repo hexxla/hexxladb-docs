@@ -1,0 +1,83 @@
+---
+title: "Search"
+description: "Content search with lexical scoring and embedding integration"
+---
+
+## SearchCells
+
+Convenience wrapper over `QueryCells` for backward compatibility. Returns `[]CellSearchResult` sorted by score; each result includes a `Coord` for use as a context-pack seed.
+
+```go
+results, err := tx.SearchCells(ctx, hexxladb.CellSearchConfig{
+    Query:         "integration test",
+    RequireTags:   []string{"fact"},
+    MinConfidence: 0.5,
+    SourceID:      "session-2",
+    Center:        &centerCoord,
+    MaxScanRadius: 5,
+    Embedding:     queryVector,
+    MaxResults:    10,
+})
+```
+
+For `ExcludeTags`, `SortBy`, `Explain`, or temporal filters, use `QueryCells` directly.
+
+## CellSearchConfig fields
+
+| Field           | Description                                  |
+| --------------- | -------------------------------------------- |
+| `Query`         | Full-text search query                       |
+| `RequireTags`   | Tags that must all be present (AND)          |
+| `AnyTags`       | Tags where at least one must be present (OR) |
+| `MinConfidence` | Minimum confidence threshold                 |
+| `MaxConfidence` | Maximum confidence threshold                 |
+| `SourceID`      | Filter by source ID                          |
+| `Center`        | Spatial query center coordinate              |
+| `MaxScanRadius` | Maximum ring radius to scan                  |
+| `Embedding`     | Vector for ANN-accelerated seed selection    |
+| `MaxResults`    | Maximum results to return                    |
+
+## Content search scoring
+
+| Condition                                      | Score contribution |
+| ---------------------------------------------- | ------------------ |
+| Query matches a tag exactly (case-insensitive) | +1.0               |
+| Query is a prefix of a tag                     | +0.8               |
+| Query found verbatim in `RawContent`           | +0.6               |
+| Query found case-insensitively in `RawContent` | +0.5               |
+| Query matches `SourceID` exactly               | +0.3               |
+| Confidence bonus                               | +0.1 × Confidence  |
+
+## CellSearchResult
+
+```go
+type CellSearchResult struct {
+    Cell  CellView
+    Score float64
+}
+```
+
+Each result's `Cell.Coord` can be used as a seed for context assembly.
+
+## Multi-seed context assembly
+
+A **seed** is a `Coord` — the centre point of a ring-walk expansion. `SearchCells` returns `CellSearchResult` values each carrying a `Coord`; those coords are the seeds passed to the assembly APIs, which expand each matched location's neighbourhood into context. One query → N matched coords → N seeds → one merged `ContextPack`.
+
+```go
+// Search for relevant cells
+results, err := tx.SearchCells(ctx, config)
+
+// Extract seeds
+seeds := make([]hexxladb.Coord, len(results))
+for i, result := range results {
+    seeds[i] = result.Cell.Coord
+}
+
+// Assemble context from multiple seeds
+pack, err := tx.LoadContextPackFrom(ctx, 2, 4096, hexxladb.ByteLenBudgeter{}, hexxladb.LoadContextBudgetConfig{}, seeds...)
+```
+
+## See also
+
+- [Query](/api/query) — Full query engine with more options
+- [Context](/api/context) — Context assembly from seeds

@@ -1,0 +1,130 @@
+---
+title: "HexxlaDB"
+description: "Persistent, structured, contradiction-aware storage with spatial indexing"
+---
+
+The spatial locality model is inspired by associative human memory — related data is placed nearby for efficient neighborhood retrieval, mirroring how associative recall works in the brain.
+
+HexxlaDB is an embedded database built from scratch for applications that need persistent, structured storage with spatial locality, contradiction tracking, and time-travel capabilities. It stores data on a hexagonal coordinate grid where **spatial locality is a first-class physical property of the on-disk format**. This is massive for any system that wants to do repeated bounded-radius traversals without paying random I/O tax.
+
+Retrieval expands outward in deterministic rings — predictable, reproducible, and bounded by your budget. Every record carries provenance, confidence, and a validity window. When two records contradict each other, the database doesn't silently overwrite one — it stores a **seam** that surfaces the conflict so your application can reconcile it.
+
+The key insight: HexxlaDB becomes the bridge from natural language → spatial coordinates → structured context.
+
+It's not "yet another vector DB with graph plugins." It's the first serious attempt to make the entire storage engine a faithful implementation of a rich, structured, contradiction-aware, temporally-valid hexagonal memory model.
+
+HexxlaDB also has a built-in **HNSW vector index** for embedding-based semantic search, so you can combine vector similarity with tag filters, source ID filters, and confidence thresholds in a single query. The results feed directly into a budgeted context assembler that knows how to evict low-value records and respect supersession chains.
+
+HexxlaDB becomes the thing that actually lets systems have persistent, inspectable, updatable, contradiction-resolving long-term memory at scale — instead of the current patchwork of RAG, graph-augmented memory, and "just stuff more tokens in the context" hacks.
+
+## Use cases
+
+**Primary use case:**
+
+- **LLM memory and context assembly** — Persistent, structured, contradiction-aware memory for LLMs and agents, with budgeted retrieval
+
+**Additional use cases:**
+
+- **Scientific research collaboration** — Track competing hypotheses with seams, supersession as theories evolve, MVCC for reproducibility, embeddings for semantic similarity across papers, spatial clustering for domain organization
+- **Medical decision support** — Contradiction awareness for drug interactions, treatment evolution tracking with supersession chains, time-travel MVCC for audit trails, confidence scoring for reliability, validity windows for time-based effectiveness
+- **Legal precedent tracking** — Edges for citation chains and precedent relationships, seams for conflicting rulings, supersession for overruling decisions, MVCC for historical analysis, validity windows for effective dates
+- **Configuration management** — Seams for detecting config drift, supersession chains for rolling changes, MVCC for instant rollback, validity windows for feature flags, confidence scoring for reliability
+- **Supply chain provenance** — Edges for tracking product journey, seams for conflicting reports, MVCC for complete audit trails, validity windows for expiration dates, provenance tracking for accountability
+
+## The problem
+
+| What you get today                                  | What you actually need                                                                   |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Stateless API calls — context lost between sessions | Persistent memory that survives restarts and spans sessions                              |
+| Retrieval by similarity alone                       | Retrieval that combines semantic similarity _with_ tags, confidence, source, and recency |
+| Preferences silently overwritten                    | Supersession chains that track how preferences evolve over time                          |
+| Contradictions invisible to the system              | Explicit conflict markers the system can see and reason about                            |
+| Budget enforced by truncation                       | Intelligent eviction that drops low-confidence outer context first                       |
+| No audit trail                                      | MVCC snapshots: "what did the system know at 3pm Tuesday?"                               |
+
+## How it works
+
+Every record lives at a coordinate on a honeycomb grid. Related records are placed near each other. When you need context for an operation, HexxlaDB walks outward ring by ring from a seed coordinate — picking up the most relevant records first, staying within your budget, and automatically filtering out superseded or low-confidence content.
+
+**Core primitives:**
+
+| Primitive     | What it is                                                                                                                                                 |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Cell**      | A record — a fact, message, preference, or document chunk — at a hex coordinate `(q, r)` with content, tags, provenance, confidence, and a validity window |
+| **Seam**      | A visible marker linking two cells that contradict each other, with a reason, confidence delta, and resolution status                                      |
+| **Edge**      | A directed relationship between cells ("see also", "follow-up", "derived from")                                                                            |
+| **Facet**     | A summary or annotation cryptographically bound to a cell                                                                                                  |
+| **Embedding** | A vector stored alongside a cell for semantic similarity search (HNSW-indexed)                                                                             |
+
+## Get started
+
+<Card title="Quick start" icon="rocket" href="/quickstart" horizontal>
+  Follow our quickstart guide to get up and running with HexxlaDB in minutes.
+</Card>
+
+## Core features
+
+<Columns cols={2}>
+  <Card title="HNSW embedding search" icon="search" href="/api/embeddings">
+    Store vectors alongside cells; approximate nearest-neighbor retrieval with
+    flat-scan fallback for small datasets.
+  </Card>
+  <Card title="Hybrid queries" icon="filter" href="/api/query">
+    Combine embedding similarity with tag filters, confidence thresholds, source
+    IDs, temporal ranges, and spatial predicates in one call.
+  </Card>
+  <Card
+    title="Hex-native spatial keys"
+    icon="grid"
+    href="/concepts/coordinates"
+  >
+    Morton-ordered `(q, r)` coordinates; ring walks are prefix scans that scale
+    with ring area, not database size.
+  </Card>
+  <Card title="Budgeted context assembly" icon="layers" href="/api/context">
+    LoadContextPackFrom evicts low-confidence outer-ring cells first; spatial
+    locality preserves semantic coherence.
+  </Card>
+  <Card
+    title="Contradiction tracking"
+    icon="alert-triangle"
+    href="/concepts/seams"
+  >
+    MarkConflict stores seams that surface disagreements; IncludeSeams injects
+    them into context so systems can reason about conflicts.
+  </Card>
+  <Card title="Supersession chains" icon="arrow-right" href="/concepts/seams">
+    MarkSupersedes records preference evolution; FilterSuperseded automatically
+    replaces stale cells with their successors.
+  </Card>
+  <Card title="MVCC time-travel" icon="clock" href="/storage/mvcc">
+    ViewAt / ViewAtTime pin read snapshots; SnapshotDiff computes changes
+    between any two points in time.
+  </Card>
+  <Card title="Encryption at rest" icon="lock" href="/operations/encryption">
+    AES-256-XTS encryption with passphrase or raw key; per-page encryption with
+    HKDF-SHA256 / Argon2id key derivation.
+  </Card>
+</Columns>
+
+## What makes this different
+
+| Capability                         | HexxlaDB | Vector DBs | Graph DBs | General stores |
+| ---------------------------------- | :------: | :--------: | :-------: | :------------: |
+| Semantic search (HNSW)             |    ✓     |     ✓      |     —     |       —        |
+| Structured filters in same query   |    ✓     |  partial   |     ✓     |       ✓        |
+| Contradiction tracking             |    ✓     |     —      |     —     |       —        |
+| Supersession chains                |    ✓     |     —      |     —     |       —        |
+| Budgeted context assembly          |    ✓     |     —      |     —     |       —        |
+| Spatial locality (ring walks)      |    ✓     |     —      |     —     |       —        |
+| MVCC time-travel                   |    ✓     |     —      |     —     |    partial     |
+| Reproducible context construction  |    ✓     |     —      |     —     |       —        |
+| Provenance + confidence per record |    ✓     |     —      |     —     |       —        |
+| Embedded (no network)              |    ✓     |     —      |     —     |       ✓        |
+| Encryption at rest                 |    ✓     |   varies   |     —     |       ✓        |
+
+**Vector DBs** (Pinecone, Weaviate, Chroma) excel at similarity search but have no concept of contradiction, supersession, or budgeted assembly. **Graph DBs** (Neo4j) model relationships well but aren't embeddable and lack spatial coherence. **Temporal DBs** (Datomic) offer immutable history but no spatial indexing. **General stores** (Postgres, SQLite) are reliable foundations, but hex coordinates, seam semantics, and context budgeting become application-level afterthoughts.
+
+HexxlaDB is purpose-built: HNSW vector search, Morton-ordered spatial keys, contradiction-aware seams, MVCC snapshots, and budgeted context assembly — in a single embedded engine.
+
+Anything which requires spatial locality, contradiction tracking, time-travel queries, and budgeted context assembly — HexxlaDB is the answer.

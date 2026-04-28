@@ -1,0 +1,135 @@
+---
+title: "Changelog"
+description: "Logical changefeed for audit trails and CDC"
+---
+
+The logical changelog is an optional append-only log that records all mutations to the database. It enables audit trails, change data capture (CDC), and replication pipelines.
+
+## Overview
+
+- **Format:** Append-only sidecar file `{primary}-changelog`
+- **Scope:** All mutations (cells, seams, facets, edges)
+- **Purpose:** Audit trails, CDC, replication
+- **Configuration:** Via `Options.ChangelogEnabled`
+
+## Enabling changelog
+
+```go
+db, err := hexxladb.Open("memory.db", &hexxladb.Options{
+    ChangelogEnabled: true,
+})
+```
+
+Once enabled, all write operations append entries to the changelog.
+
+## Changelog entry structure
+
+Each entry includes:
+- **Commit sequence** — MVCC commit identifier
+- **Operation type** — Put, Delete, etc.
+- **Key family** — cell, seam, facet, edge
+- **Key** — The affected key
+- **Value** (optional) — New value for Put operations
+- **Timestamp** — Wall-clock time
+
+## Reading the changelog
+
+### Read from a point
+
+```go
+entries, err := db.ReadChangelogSince(seq)
+for _, entry := range entries {
+    fmt.Printf("Op: %s, Key: %s\n", entry.Op, entry.Key)
+}
+```
+
+### Read all
+
+```go
+entries, err := db.ReadChangelogSince(0)
+```
+
+## Use cases
+
+### Audit trails
+
+Track all changes for compliance and debugging:
+
+```go
+entries, err := db.ReadChangelogSince(0)
+for _, entry := range entries {
+    log.Printf("Change at seq %d: %s on %s", entry.Seq, entry.Op, entry.Key)
+}
+```
+
+### Change data capture
+
+Feed changes to external systems:
+
+```go
+lastSeq := loadLastProcessedSeq()
+entries, err := db.ReadChangelogSince(lastSeq)
+for _, entry := range entries {
+    publishToKafka(entry)
+    saveLastProcessedSeq(entry.Seq)
+}
+```
+
+### Replication
+
+Replicate to another database:
+
+```go
+entries, err := db.ReadChangelogSince(lastSeq)
+for _, entry := range entries {
+    replicateToTarget(entry)
+}
+```
+
+## Changelog and MVCC
+
+The changelog records committed mutations at their commit sequence. This aligns with MVCC snapshots for consistent replay.
+
+## Compaction behavior
+
+The changelog is **not** carried over during compaction. After compacting:
+1. Close the database
+2. Compact to new file
+3. Re-open with changelog enabled
+4. Changelog starts fresh from the compacted state
+
+## Performance considerations
+
+- **Write overhead:** Minimal (append-only, sequential writes)
+- **Space:** Grows with write volume; manage via rotation or archival
+- **Read performance:** Fast sequential reads from a point
+
+## Changelog rotation
+
+The changelog does not support automatic rotation. For long-running systems:
+- Monitor changelog file size
+- Archive or truncate based on retention policy
+- Consider external log aggregation systems
+
+## Incident response
+
+### Changelog tail corruption
+
+**Signal:** `ErrChangelogCorrupt` from `ReadChangelogSince`
+
+**Response:**
+- Pause consumers
+- Truncate/repair changelog per ops policy
+- Re-bootstrap derived state from DB truth + reconciliation steps
+
+## Limitations
+
+- Changelog is not encrypted (even if database is encrypted)
+- No automatic rotation or archival
+- Sidecar file (not in B+ tree)
+- Does not support filtering by operation type during read
+
+## See also
+
+- [MVCC](/storage/mvcc) — Multi-version concurrency control
+- [Backups](/operations/backups) — Backup and restore procedures

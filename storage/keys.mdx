@@ -1,0 +1,183 @@
+---
+title: "Keys"
+description: "Coordinate packing and key encoding in HexxlaDB"
+---
+
+HexxlaDB uses Morton (Z-order) encoding to pack hexagonal coordinates into compact keys that preserve spatial locality in the B+ tree. This makes ring walks and neighborhood scans efficient prefix operations.
+
+## Coordinate packing scheme
+
+To support efficient ring scans and spatial locality:
+
+1. Convert axial `(q, r)` to cube coordinates `(q, r, s)` where `s = -q - r`
+2. Zigzag-encode each signed coordinate to unsigned values
+3. Compute a Morton (Z-order) code by interleaving the bits of the encoded values
+
+The resulting `PackedCoord` (typically 128-bit or wider) is used as the primary key.
+
+## PackedCoord
+
+```go
+type PackedCoord uint128
+```
+
+**Key properties:**
+- Spatially close coordinates have nearby keys
+- Ring walks become efficient prefix scans
+- Scales with ring area, not database size
+- High-order bits support future super-hex region identifiers for sharding
+
+## Packing and unpacking
+
+```go
+// Pack axial coordinates into PackedCoord
+coord := hexxladb.Coord{Q: 3, R: 1}
+pk, err := lattice.Pack(coord)
+
+// Unpack PackedCoord back to axial coordinates
+coord, err := lattice.Unpack(pk)
+```
+
+## Morton ordering
+
+Morton ordering maps spatially close points to nearby keys with high probability. This is expected to benefit neighborhood operations like ring walks and context assembly.
+
+**Why Morton encoding?**
+- Preserves spatial locality in the B+ tree
+- Enables efficient prefix scans for ring enumeration
+- Natural support for hierarchical clustering (super-hex regions)
+- Deterministic and reversible
+
+## Key family encoding
+
+### Cell keys
+
+```
+cell/<packed_coord>
+```
+
+Example: `cell/0x1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p`
+
+### Facet keys
+
+```
+facet/<packed_coord>/<facet_id>
+```
+
+Example: `facet/0x1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p/1`
+
+### Edge keys
+
+```
+edge/<packed_from>/<packed_to>/<type>
+```
+
+Example: `edge/0x1a2b.../0x2c3d.../see-also`
+
+### Seam keys
+
+**Primary:**
+```
+seam/<ulid>
+```
+
+Example: `seam/01H5X9Y8Z7W6V5U4T3S2R1Q0P9O8N7M`
+
+**Secondary (by cells):**
+```
+seam-by-cells/<packed_a>/<packed_b>/<ulid>
+```
+
+Uses canonical ordering (lower `PackedCoord` first) so each pair appears once.
+
+### Embedding keys
+
+```
+embed/<packed_coord>
+```
+
+Stores a fixed-dimension float32 vector (little-endian).
+
+### HNSW keys
+
+```
+hnsw/meta
+hnsw/entry
+hnsw/node/<packed_coord>
+```
+
+### Secondary index keys
+
+**Tag index:**
+```
+tag/<tag>/<packed_coord>
+```
+
+Length-prefixed UTF-8 tag + packed coord.
+
+**Source index:**
+```
+source/<source_id>/<packed_coord>
+```
+
+Length-prefixed source ID + packed coord.
+
+**Time index:**
+```
+time/<valid_bucket>/<packed_coord>
+```
+
+Week bucket from validity window.
+
+**Seam time index:**
+```
+seam-time/<valid_bucket>/<ulid>
+```
+
+**Seam source index:**
+```
+seam-source/<source_id>/<ulid>
+```
+
+## MVCC version suffixes
+
+When MVCC is enabled (format v2), version suffixes are appended:
+
+```
+cell/<packed_coord>#<commit_seq>
+facet/<packed_coord>/<facet_id>#<commit_seq>
+edge/<packed_from>/<packed_to>/<type>#<commit_seq>
+seam/<ulid>#<commit_seq>
+```
+
+This allows multiple committed versions to coexist, with visibility scoped by `commit_seq`.
+
+## Timeline keys
+
+Map wall-clock `as_of` to snapshots:
+
+```
+__meta/commit-time/<wall_nanos>/<commit_seq>
+```
+
+Required for `ViewAtTime` on format v2.
+
+## Key ordering
+
+Keys are ordered lexicographically within each family. This enables:
+- Efficient range scans for ring walks
+- Prefix scans for neighborhood queries
+- Ordered iteration for secondary indexes
+
+## Zigzag encoding
+
+Signed coordinates are zigzag-encoded before Morton interleaving:
+- Maps signed integers to unsigned integers
+- Preserves ordering: smaller signed values map to smaller unsigned values
+- Enables bit interleaving without sign bit complications
+
+## See also
+
+- [Storage layout](/storage/layout) — Key families and on-disk format
+- [Coordinates](/concepts/coordinates) — Hexagonal addressing system
+- [MVCC](/storage/mvcc) — Multi-version concurrency control

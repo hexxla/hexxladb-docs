@@ -1,0 +1,127 @@
+---
+title: "Encryption"
+description: "AES-256-XTS encryption at rest for HexxlaDB"
+---
+
+HexxlaDB supports optional AES-256-XTS encryption at the page layer for data at rest protection.
+
+## Overview
+
+- **Algorithm:** AES-256-XTS
+- **Scope:** Per-page encryption
+- **Key derivation:** HKDF-SHA256 / Argon2id
+- **Configuration:** Via `Options` at database open
+
+## Enabling encryption
+
+### With passphrase
+
+```go
+db, err := hexxladb.Open("memory.db", &hexxladb.Options{
+    Passphrase: "your-passphrase-here",
+})
+```
+
+The passphrase is derived using Argon2id with HKDF-SHA256 to generate the encryption key.
+
+### With raw key
+
+```go
+db, err := hexxladb.Open("memory.db", &hexxladb.Options{
+    EncryptionKey: []byte("32-byte-raw-encryption-key-here"),
+})
+```
+
+The raw key must be 32 bytes for AES-256.
+
+## Key derivation
+
+From passphrase:
+
+1. Argon2id key derivation with configurable parameters
+2. HKDF-SHA256 to derive encryption key
+3. Salt is stored in the database header
+
+This provides memory-hard key derivation to resist brute-force attacks.
+
+## Encryption scope
+
+- **Primary database:** All pages encrypted
+- **WAL:** Encrypted with same key
+- **Changelog:** Not encrypted (separate file)
+
+## Key mismatch detection
+
+Wrong key or passphrase fails deterministically at open with `ErrEncryptionKeyMismatch` once the database has an encryption verifier.
+
+```go
+db, err := hexxladb.Open("memory.db", &hexxladb.Options{
+    Passphrase: "wrong-passphrase",
+})
+// err == hexxladb.ErrEncryptionKeyMismatch
+```
+
+## Key rotation
+
+Use `RotateEncryption` for offline key rotation or re-encryption:
+
+```go
+err := db.RotateEncryption(ctx, &hexxladb.Options{
+    Passphrase: "new-passphrase",
+})
+```
+
+For large databases, use `RotateEncryptionWithOptions` to stream rows in batches with progress callbacks:
+
+```go
+err := db.RotateEncryptionWithOptions(ctx, &hexxladb.Options{
+    Passphrase: "new-passphrase",
+}, hexxladb.RotationOptions{
+    BatchSize: 1000,
+    OnProgress: func(rotated, total int) {
+        fmt.Printf("Progress: %d/%d\n", rotated, total)
+    },
+})
+```
+
+## Security considerations
+
+### Passphrase storage
+
+- Never hardcode passphrases in source code
+- Use environment variables or secrets managers
+- Rotate keys periodically per your security policy
+
+### Key management
+
+- Generate strong, random passphrases (at least 32 characters)
+- Store backup keys securely
+- Document key rotation procedures
+
+### Performance
+
+- Encryption adds minimal overhead (~5-10%)
+- Per-page encryption enables parallel I/O
+- WAL encryption is synchronous but fast
+
+## Incident response
+
+### Encryption key mismatch
+
+**Signal:** `Open` returns `ErrEncryptionKeyMismatch`
+
+**Response:**
+- Confirm key derivation path (env/secrets manager)
+- Never guess keys in production
+- Recovery: restore from backup taken with correct key material, or offline `RotateEncryption` after establishing a readable copy
+
+## Limitations
+
+- Changelog file is not encrypted (separate concern)
+- Encryption is at-rest only; data is decrypted in memory
+- Keys are not managed by the database — application responsibility
+
+## See also
+
+- [Backups](/operations/backups) — Backup and restore procedures
+- [Options](/api/options) — Configuration options including encryption

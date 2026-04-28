@@ -1,0 +1,123 @@
+---
+title: "Storage layout"
+description: "On-disk format and key families in HexxlaDB"
+---
+
+HexxlaDB uses a custom B+ tree with Morton-ordered keys for efficient spatial operations. The storage layout is hex-native — ring walks and neighborhood loads are native prefix/range scans, not translated queries.
+
+## Architecture
+
+HexxlaDB is a **custom, from-scratch, embedded database**:
+- Durable on-disk format with crash recovery
+- Single B+ tree over Morton-prefixed keys
+- Configurable page sizes (4 KiB default, 4/8/16/64 KiB supported)
+- Write-Ahead Log (WAL) for durability
+- **No SQLite, no third-party ordered-KV or SQL engine**
+
+The engine treats the hexagonal lattice as a first-class citizen with axial coordinates as the primary addressing mechanism.
+
+## Core data model
+
+### Cell
+
+- **Primary key:** `PackedCoord` (128-bit Morton-encoded coordinate)
+- **Fields:** RawContent (immutable), Provenance, Validity, Tags, ClusterHint
+- **Secondary indexes:** `source/`, `time/`, `tag/` for efficient discovery
+
+### Facet
+
+- **Composite key:** `facet/<packed_coord>/<facet_id>` (facet_id: 0-5)
+- **Fields:** DerivedContent, LastRotated, DerivationHash
+- **Purpose:** Multiple views of the same content without modifying original
+
+### Edge
+
+- **Composite key:** `edge/<packed_from>/<packed_to>/<type>`
+- **Fields:** RelationType, Weight, Provenance
+- **Purpose:** Lightweight, high-volume directed relationships
+
+### Seam
+
+- **Primary key:** `seam/<ulid>` (ULID = time-ordered 128-bit identifier)
+- **Secondary:** `seam-by-cells/<packed_a>/<packed_b>/<ulid>` (canonical ordering)
+- **Fields:** CellA, CellB, SeamType, Reason, ConfidenceDelta, DetectedAt, ResolutionStatus, ResolutionNote
+- **Purpose:** First-class contradiction artifacts with lifecycle and audit trail
+
+## Key families
+
+### Primary data
+
+| Key pattern | Value |
+| ----------- | ----- |
+| `cell/<packed_coord>` | Full cell record |
+| `facet/<packed_coord>/<facet_id>` | Facet data |
+| `edge/<packed_from>/<packed_to>/<type>` | Edge record |
+| `seam/<ulid>` | Full seam record |
+
+### Secondary indexes
+
+| Key pattern | Purpose |
+| ----------- | ------- |
+| `seam-by-cells/<packed_a>/<packed_b>/<ulid>` | Find seams by cell participation |
+| `time/<valid_bucket>/<packed_coord>` | Temporal index for cells |
+| `source/<source_id>/<packed_coord>` | Find cells by source |
+| `tag/<tag>/<packed_coord>` | Find cells by tag |
+| `seam-time/<valid_bucket>/<ulid>` | Temporal index for seams |
+| `seam-source/<source_id>/<ulid>` | Source index for seams |
+
+### Embeddings (HNSW)
+
+| Key pattern | Value |
+| ----------- | ----- |
+| `embed/<packed_coord>` | Fixed-dimension float32 vector |
+| `hnsw/meta` | HNSW graph metadata (M, efConstruction, maxLayer, count) |
+| `hnsw/entry` | HNSW entry point coordinate |
+| `hnsw/node/<packed_coord>` | HNSW node (maxLayer + per-layer neighbor lists) |
+
+Embeddings are optional. Enabled when `Options.EmbeddingDimension` > 0.
+
+## MVCC physical keys
+
+When `Options.EnableMVCC` opens a format v2 database, version suffixes are appended to physical B+ tree keys for cells, facets, edges, seams, and secondaries. Multiple committed versions coexist, with visibility scoped by `commit_seq`.
+
+Example: `cell/<packed_coord>#<commit_seq>`
+
+Timeline keys map wall-clock `as_of` to snapshots:
+- `__meta/commit-time/<wall_nanos>/<commit_seq>`
+
+## Logical changefeed
+
+Optional append-only changelog for consumers lives in a sidecar file `{primary}-changelog` when enabled (not a B+ tree prefix). Used for audit trails, CDC, and replication pipelines.
+
+## Page structure
+
+- **Default page size:** 4 KiB
+- **Supported sizes:** 4, 8, 16, 64 KiB
+- **Overflow pages:** Values up to 1 MiB supported
+- **Compression:** Always-on DEFLATE
+
+## WAL (Write-Ahead Log)
+
+- Ensures durability before writes reach the main B+ tree
+- Truncated to zero after primary is durable
+- Prevents data loss on crash
+
+## Compaction
+
+- Copy-compaction for file size recovery
+- MVCC tombstones and version pruning
+- Manual via `Compact` or `CompactTo`
+
+## Edge vs Seam storage
+
+Edges and seams are **distinct storage families**:
+- **Edges:** Lightweight, high-volume, typed/weighted relations for traversal
+- **Seams:** First-class contradiction artifacts with lifecycle and audit trail
+
+The `Cell.Edges` and seam lists in the API are read aggregates (materialized views), not denormalized primary storage.
+
+## See also
+
+- [Keys](/storage/keys) — Coordinate packing and encoding
+- [MVCC](/storage/mvcc) — Multi-version concurrency control
+- [Coordinates](/concepts/coordinates) — Hexagonal addressing system

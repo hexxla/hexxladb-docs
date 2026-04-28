@@ -1,0 +1,6 @@
+```go
+db.Update(func(tx *hexxladb.Tx) error {
+    // Write operations here
+    return tx.PutCell(ctx, record.CellRecord{...})
+})
+```

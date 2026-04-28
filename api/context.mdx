@@ -1,0 +1,133 @@
+---
+title: "Context"
+description: "Budgeted context assembly with supersession filtering"
+---
+
+## LoadContextPack
+
+Budgeted context assembly with supersession filtering.
+
+```go
+pack, err := tx.LoadContextPack(ctx,
+    2,     // max ring radius
+    4096,  // budget
+    hexxladb.ByteLenBudgeter{},
+    hexxladb.LoadContextBudgetConfig{
+        FilterSuperseded: true,
+        IncludeSeams:     true,
+    },
+    centerCoord,
+)
+```
+
+## LoadContextPackFrom
+
+Unified variadic entry point: one coord → zero-overhead `LoadContextPack`; multiple coords → `LoadMultiContextPack` with deduplication.
+
+```go
+// Single seed (zero overhead)
+pack, err := tx.LoadContextPackFrom(ctx, 2, 4096, hexxladb.ByteLenBudgeter{}, config, centerCoord)
+
+// Multiple seeds (with deduplication)
+pack, err := tx.LoadContextPackFrom(ctx, 2, 4096, hexxladb.ByteLenBudgeter{}, config, seed1, seed2, seed3)
+```
+
+## LoadContextBudgetConfig
+
+```go
+type LoadContextBudgetConfig struct {
+    FilterSuperseded bool   // Replace superseded cells with successors
+    IncludeSeams     bool   // Include contradiction markers
+    SeamRadius       int    // Radius for seam discovery
+    MaxSeams         int    // Maximum seams to include
+    Explain          bool   // Return per-cell inclusion reasons
+}
+```
+
+## Budgeters
+
+### ByteLenBudgeter
+
+Budget by byte length of content.
+
+```go
+budgeter := hexxladb.ByteLenBudgeter{}
+```
+
+### TokenBudgeter
+
+Custom budgeter interface for token counting.
+
+```go
+type TokenBudgeter interface {
+    Budget(cell CellView) int
+}
+```
+
+## ContextPack
+
+```go
+type ContextPack struct {
+    Cells       []CellView
+    TotalTokens int
+    Seams       []Seam
+    Stats       ContextPackStats
+}
+```
+
+Ordering rule: concentric rings from center outward, then axial spiral order within each ring. If budget is exceeded, the system drops the lowest-confidence items from outer rings first.
+
+## AssembleCellView
+
+One coord → `CellView` with options.
+
+```go
+view, err := tx.AssembleCellView(ctx, pk, hexxladb.DefaultAssembleCellViewOpts)
+```
+
+## FilterCellViews
+
+Post-process assembled views with predicate.
+
+```go
+filtered := hexxladb.FilterCellViews(views, func(view CellView) bool {
+    return view.Confidence > 0.5
+})
+```
+
+## TruncateCellViewsToTokenBudget
+
+Truncate views to fit budget.
+
+```go
+truncated := hexxladb.TruncateCellViewsToTokenBudget(views, 4096, hexxladb.ByteLenBudgeter{})
+```
+
+## ContextPackStats
+
+Assembly statistics:
+
+```go
+type ContextPackStats struct {
+    Candidates     int
+    Evicted        int
+    MaxRing        int
+    Superseded     int
+}
+```
+
+## CellExplanation
+
+Per-cell inclusion/eviction reason (Explain mode):
+
+```go
+type CellExplanation struct {
+    Reason        string // "included", "evicted_low_confidence", "superseded"
+    SupersededBy  Coord  // Set on superseded exclusions
+}
+```
+
+## See also
+
+- [Cells](/concepts/cells) — Core data units
+- [Seams](/concepts/seams) — Contradiction markers

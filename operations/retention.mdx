@@ -1,0 +1,140 @@
+---
+title: "Retention"
+description: "MVCC retention and pruning in HexxlaDB"
+---
+
+For format-v2 databases (open a new database with `Options.EnableMVCC`), you can configure retention policies and prune old versions to reclaim space.
+
+## Overview
+
+MVCC retains multiple versions of data for time-travel queries. Without pruning, the database grows unbounded. Retention policies control how much history to keep.
+
+## Configuring retention
+
+```go
+db, err := hexxladb.Open("memory.db", &hexxladb.Options{
+    EnableMVCC: true,
+    MVCCRetention: hexxladb.MVCCRetention{
+        RetainCommitsBehindHead: 1000, // Keep 1000 commits of history
+    },
+})
+```
+
+**Key points:**
+- Retention is in **commits**, not wall-clock time
+- Zero (default) disables automatic suggestions
+- Only versions with strictly lower `commit_seq` than `(header.CommitSeq - RetainCommitsBehindHead)` may be reclaimed
+- Latest visible version per logical cell is never pruned
+
+## Mapping time to commits
+
+Since retention is in commits, map your SLAs to commits based on observed commit rate:
+
+```go
+// If you observe ~100 commits per hour
+// 24 hours = 2400 commits
+RetainCommitsBehindHead: 2400,
+```
+
+## Pruning APIs
+
+### Get MVCC statistics
+
+```go
+stats, err := db.StatsMVCC()
+// stats.CommitSeq — current commit sequence
+// stats.LogicalCellCount — number of unique cells
+// stats.VersionedRowCount — total versioned rows
+```
+
+### Suggested prune sequence
+
+```go
+beforeSeq, err := db.SuggestedPruneBeforeSeq()
+// Returns the suggested sequence based on retention policy
+```
+
+### Explicit prune
+
+```go
+pruned, err := db.PruneCellVersions(beforeSeq, 100_000)
+// Prunes versions with commit_seq < beforeSeq
+// Returns count of rows removed
+```
+
+### Prune with profile
+
+```go
+plan := hexxladb.MVCCPrunePlan{
+    Profile: hexxladb.PruneProfileBalanced,
+}
+pruned, err := db.PruneCellVersionsByProfile(plan)
+```
+
+Profiles:
+- `PruneProfileLowLatency` — Aggressive pruning, minimal history
+- `PruneProfileBalanced` — Default balance
+- `PruneProfileLongHistory` — Conservative pruning, more history
+
+### Prune scheduler
+
+```go
+scheduler := hexxladb.NewPruneScheduler(db)
+pruned, err := scheduler.Tick(ctx)
+// One bounded pass — call from your own timer
+```
+
+**Note:** No background goroutine runs inside the library. You control when pruning happens.
+
+## Recommended cadence
+
+Run pruning during low-traffic windows:
+
+```go
+for {
+    pruned, err := db.PruneCellVersions(beforeSeq, 100_000)
+    if pruned == 0 {
+        break // No more to prune
+    }
+    // Continue until pass deletes 0 rows
+}
+// Re-check StatsMVCC
+```
+
+## Pruning and compaction
+
+Pruning marks versions as deleted but doesn't immediately reclaim space. To reclaim space:
+
+```go
+db.PruneCellVersions(beforeSeq, 100_000) // remove stale versions
+db.Compact(ctx, destPath)                // rewrite without dead pages
+```
+
+## MVCC btree errors during prune
+
+**Signal:** `PruneCellVersions` or `StatsMVCC` ascent fails mid-operation with engine errors.
+
+**Response:**
+- Stop writing
+- Backup files
+- Restore from known-good snapshot
+- Only use `Update` / primitives — avoid raw `Tx.Put` reordering `cell/` vs `__meta/commit-time/` keys on format v2
+
+## Performance considerations
+
+- **Pruning overhead:** Depends on version count and batch size
+- **Batch size:** Larger batches are more efficient but use more memory
+- **Compaction:** Required to reclaim space after pruning
+- **Read performance:** Unaffected by pruning (snapshot reads are fast)
+
+## Monitoring
+
+Track these metrics:
+- `VersionedRowCount` — Total versioned rows (should stabilize with pruning)
+- `LogicalCellCount` — Unique cells (grows with data, not versions)
+- `CommitSeq` — Current commit sequence (monotonically increasing)
+
+## See also
+
+- [MVCC](/storage/mvcc) — Multi-version concurrency control
+- [Backups](/operations/backups) — Compaction and file management
